@@ -3,10 +3,13 @@ package auth
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
-		"net/url"
+	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -39,8 +42,55 @@ type OIDCService struct {
 	http *resty.Client
 }
 
+// 创建针对 OIDC 高稳定性定制的 HTTP 客户端 (关闭 HTTP/2，彻底规避对端 GOAWAY ENHANCE_YOUR_CALM 限频)
+func createOIDCClient() *resty.Client {
+	transport := &http.Transport{
+		TLSClientConfig:   &tls.Config{InsecureSkipVerify: false},
+		ForceAttemptHTTP2: false,
+		// 关键：清空 TLSNextProto，强制禁用 HTTP/2 ALPN 协商，采用极度稳定的 HTTP/1.1 协议
+		TLSNextProto:    make(map[string]func(authority string, c *tls.Conn) http.RoundTripper),
+		MaxIdleConns:    100,
+		IdleConnTimeout: 30 * time.Second,
+	}
+
+	return resty.New().
+		SetTransport(transport).
+		SetTimeout(10 * time.Second).
+		SetRetryCount(2).
+		SetRetryWaitTime(250 * time.Millisecond).
+		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+}
+
 var DefaultOIDCService = &OIDCService{
-	http: resty.New().SetTimeout(12 * time.Second),
+	http: createOIDCClient(),
+}
+
+// parseIDTokenPayload 从 id_token JWT 中直接解析用户信息 payload (免去向 userinfo 发起网络请求，极速且 100% 免疫网络限频)
+func parseIDTokenPayload(idToken string) (*OIDCUserInfo, error) {
+	parts := strings.Split(idToken, ".")
+	if len(parts) < 2 {
+		return nil, errors.New("invalid jwt format")
+	}
+
+	payloadSegment := parts[1]
+	// 补齐 Base64 padding
+	if l := len(payloadSegment) % 4; l > 0 {
+		payloadSegment += strings.Repeat("=", 4-l)
+	}
+
+	decoded, err := base64.URLEncoding.DecodeString(payloadSegment)
+	if err != nil {
+		decoded, err = base64.StdEncoding.DecodeString(payloadSegment)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	var user OIDCUserInfo
+	if err := json.Unmarshal(decoded, &user); err != nil {
+		return nil, err
+	}
+	return &user, nil
 }
 
 // GetDiscovery 获取 OIDC 服务商的端点发现
@@ -110,12 +160,12 @@ func (s *OIDCService) HandleCallback(ctx context.Context, code, host string) (*m
 	if cfg.Issuer == "" || code == "mock_oidc_code" {
 		oidcUser = OIDCUserInfo{
 			Sub:               "oidc_sub_demo_1001",
-			Email:             "admin@kkio.com", // 默认邮箱用于匹配默认管理员
+			Email:             "admin@kkio.com",
 			Name:              "OIDC 认证测试员",
 			PreferredUsername: "oidc_user",
 		}
 	} else {
-		// 2. 向 OIDC Token 端点换取 access_token
+		// 2. 向 OIDC Token 端点换取 id_token 与 access_token
 		disc, _ := s.GetDiscovery(ctx, cfg.Issuer)
 		tokenEndpoint := ""
 		if disc != nil && disc.TokenEndpoint != "" {
@@ -149,24 +199,47 @@ func (s *OIDCService) HandleCallback(ctx context.Context, code, host string) (*m
 			return nil, "", fmt.Errorf("parse oidc token error: %w", err)
 		}
 
-		// 3. 向 userinfo 端点拉取用户信息
-		userInfoEndpoint := ""
-		if disc != nil && disc.UserinfoEndpoint != "" {
-			userInfoEndpoint = disc.UserinfoEndpoint
-		} else {
-			userInfoEndpoint = strings.TrimSuffix(cfg.Issuer, "/") + "/protocol/openid-connect/userinfo"
+		// 3. 【核心优化 1】优先从 id_token JWT 中直接解析用户信息 (纯内存解析，零网络开销，100% 规避对端限频)
+		if tokData.IDToken != "" {
+			if parsedUser, parseErr := parseIDTokenPayload(tokData.IDToken); parseErr == nil && parsedUser != nil {
+				oidcUser = *parsedUser
+				logger.Info("[OIDC] 成功从 id_token 本地提取用户信息", zap.String("sub", oidcUser.Sub), zap.String("email", oidcUser.Email))
+			}
 		}
 
-		uResp, err := s.http.R().SetContext(ctx).
-			SetHeader("Authorization", "Bearer "+tokData.AccessToken).
-			Get(userInfoEndpoint)
+		// 4. 【核心优化 2】仅当 id_token 中未获取到邮箱时，才尝试请求 userinfo 端点进行补充
+		if oidcUser.Email == "" {
+			userInfoEndpoint := ""
+			if disc != nil && disc.UserinfoEndpoint != "" {
+				userInfoEndpoint = disc.UserinfoEndpoint
+			} else {
+				userInfoEndpoint = strings.TrimSuffix(cfg.Issuer, "/") + "/protocol/openid-connect/userinfo"
+			}
 
-		if err != nil {
-			return nil, "", fmt.Errorf("request oidc userinfo error: %w", err)
-		}
+			uResp, err := s.http.R().SetContext(ctx).
+				SetHeader("Authorization", "Bearer "+tokData.AccessToken).
+				Get(userInfoEndpoint)
 
-		if err := json.Unmarshal(uResp.Body(), &oidcUser); err != nil {
-			return nil, "", fmt.Errorf("parse oidc userinfo error: %w", err)
+			if err == nil && uResp.StatusCode() == 200 {
+				var infoFromEndpoint OIDCUserInfo
+				if err := json.Unmarshal(uResp.Body(), &infoFromEndpoint); err == nil {
+					if infoFromEndpoint.Email != "" {
+						oidcUser.Email = infoFromEndpoint.Email
+					}
+					if infoFromEndpoint.Sub != "" && oidcUser.Sub == "" {
+						oidcUser.Sub = infoFromEndpoint.Sub
+					}
+					if infoFromEndpoint.Name != "" && oidcUser.Name == "" {
+						oidcUser.Name = infoFromEndpoint.Name
+					}
+				}
+			} else if err != nil {
+				logger.Warn("[OIDC] 请求 userinfo 失败，但继续尝试通过已有凭据登录", zap.Error(err))
+				// 若已有 sub 则不抛出致命错误中断，继续放行登录！
+				if oidcUser.Sub == "" {
+					return nil, "", fmt.Errorf("request oidc userinfo error: %w", err)
+				}
+			}
 		}
 	}
 
@@ -177,7 +250,7 @@ func (s *OIDCService) HandleCallback(ctx context.Context, code, host string) (*m
 	)
 
 	// ==========================================
-	// 4. 核心：根据邮箱与 OIDC Sub 进行匹配与自动绑定
+	// 5. 核心：根据邮箱与 OIDC Sub 进行匹配与自动绑定
 	// ==========================================
 	var user model.User
 	found := false
@@ -188,7 +261,6 @@ func (s *OIDCService) HandleCallback(ctx context.Context, code, host string) (*m
 		if err == nil {
 			found = true
 			logger.Info("OIDC: User matched by email", zap.String("email", oidcUser.Email), zap.Uint("user_id", user.ID))
-			// 绑定 OIDC 标识
 			user.OIDCIssuer = cfg.Issuer
 			user.OIDCSub = oidcUser.Sub
 			if user.Nickname == "" && oidcUser.Name != "" {
@@ -207,7 +279,7 @@ func (s *OIDCService) HandleCallback(ctx context.Context, code, host string) (*m
 		}
 	}
 
-	// 规则 3：若均未找到，自动创建新用户并关联邮箱与租户
+	// 规则 3：若均未找到，自动创建新用户并关联邮箱与租户 (默认赋予租户管理员角色)
 	if !found {
 		username := oidcUser.PreferredUsername
 		if username == "" && oidcUser.Email != "" {
@@ -217,7 +289,6 @@ func (s *OIDCService) HandleCallback(ctx context.Context, code, host string) (*m
 			username = "oidc_" + oidcUser.Sub
 		}
 
-		// 检查用户名是否重复
 		var count int64
 		database.DB.Model(&model.User{}).Where("username = ?", username).Count(&count)
 		if count > 0 {
@@ -231,12 +302,12 @@ func (s *OIDCService) HandleCallback(ctx context.Context, code, host string) (*m
 
 		hash, _ := bcrypt.GenerateFromPassword([]byte("oidc_user@2025"), bcrypt.DefaultCost)
 		user = model.User{
-			TenantID:   1, // 归属于默认租户
+			TenantID:   1,
 			Username:   username,
 			Email:      oidcUser.Email,
 			Password:   string(hash),
 			Nickname:   nickname,
-			Role:       "admin", // OIDC 企业登录用户默认享有租户管理员完整权限 (租户行级隔离保护)
+			Role:       "admin", // 企业 OIDC 用户享有租户管理员权限
 			Status:     1,
 			OIDCIssuer: cfg.Issuer,
 			OIDCSub:    oidcUser.Sub,
