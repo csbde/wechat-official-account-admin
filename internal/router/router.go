@@ -119,6 +119,7 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 	authHandler := &handler.AuthHandler{}
 	systemHandler := &handler.SystemHandler{}
 	qrcodeHandler := &handler.QrcodeHandler{}
+	miniHandler := &handler.MiniProgramHandler{}
 
 	// 公开接口 (无需认证)
 	authGroup := api.Group("/auth")
@@ -131,6 +132,7 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 	api.GET("/system/public-ip", systemHandler.PublicIP)
 	api.GET("/system/health", systemHandler.HealthCheck)
 	api.GET("/qrcode/:id/image", qrcodeHandler.GetImage)
+	api.POST("/miniprogram/code2session", miniHandler.Code2Session)
 
 	// 微信扫码授权重定向回调端点 (由微信浏览器重定向直连访问，无需 JWT Header)
 	api.GET("/open/auth-callback", openHandler.AuthCallback)
@@ -219,8 +221,16 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 
 			// 带参二维码
 			qrcodeHandler := &handler.QrcodeHandler{}
+	miniHandler := &handler.MiniProgramHandler{}
 			tenant.GET("/qrcode", qrcodeHandler.List)
 			tenant.POST("/qrcode", qrcodeHandler.Create)
+
+			// 微信小程序代开发与快速注册
+			tenant.GET("/miniprogram/tasks", miniHandler.ListTasks)
+			tenant.POST("/miniprogram/tasks", miniHandler.CreateTask)
+			tenant.POST("/miniprogram/tasks/:id/refresh", miniHandler.RefreshTask)
+			tenant.GET("/miniprogram/domain", miniHandler.GetDomain)
+			tenant.POST("/miniprogram/domain", miniHandler.SetDomain)
 		}
 	}
 

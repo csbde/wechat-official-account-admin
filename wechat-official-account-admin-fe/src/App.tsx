@@ -7,6 +7,7 @@ import { AppLayout } from '@/components/layout/AppLayout'
 import { LoginPage } from '@/pages/login/LoginPage'
 import { DashboardPage } from '@/pages/dashboard/DashboardPage'
 import { AccountsPage } from '@/pages/accounts/AccountsPage'
+import { MiniProgramPage } from '@/pages/miniprogram/MiniProgramPage'
 import { WxGatePage } from '@/pages/wxgate/WxGatePage'
 import { MenuDesignerPage } from '@/pages/menu/MenuDesignerPage'
 import { MaterialsPage } from '@/pages/materials/MaterialsPage'
@@ -94,6 +95,8 @@ export const App: React.FC = () => {
         return <DashboardPage onNavigate={setCurrentTab} />
       case 'accounts':
         return <AccountsPage />
+      case 'miniprogram':
+        return <MiniProgramPage />
       case 'wxgate':
         return <WxGatePage />
       case 'menu':

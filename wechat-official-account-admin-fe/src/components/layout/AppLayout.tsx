@@ -2,6 +2,7 @@ import React, { useEffect } from 'react'
 import {
   LayoutDashboard,
   Smartphone,
+  AppWindow,
   MenuSquare,
   Image as ImageIcon,
   MessageSquareReply,
