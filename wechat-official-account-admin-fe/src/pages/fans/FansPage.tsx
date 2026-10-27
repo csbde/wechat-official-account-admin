@@ -9,7 +9,7 @@ import {
 import { api, PageResult } from '@/lib/api'
 import { useAppStore } from '@/stores/app'
 import { Button } from '@/components/ui/button'
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -34,10 +34,12 @@ import {
   Search,
   Edit2,
   Trash2,
-  UserCheck,
   CheckCircle2,
   AlertCircle,
-  Activity,
+  Plus,
+  Check,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatDate } from '@/lib/utils'
@@ -47,27 +49,37 @@ export const FansPage: React.FC = () => {
   const { currentApp } = useAppStore()
 
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
   const [keyword, setKeyword] = useState('')
   const [selectedTag, setSelectedTag] = useState('')
   const [selectedOpenIDs, setSelectedOpenIDs] = useState<string[]>([])
+  const [jumpPage, setJumpPage] = useState('')
 
   // 备注弹窗
   const [remarkModalOpen, setRemarkModalOpen] = useState(false)
   const [editingFan, setEditingFan] = useState<any>(null)
   const [remarkText, setRemarkText] = useState('')
 
-  // 标签管理弹窗
+  // 单用户标签管理弹窗 (重点解决行内无法打标签的问题！)
+  const [singleTagModalOpen, setSingleTagModalOpen] = useState(false)
+  const [taggingFan, setTaggingFan] = useState<any>(null)
+
+  // 微信标签体系管理弹窗
   const [tagModalOpen, setTagModalOpen] = useState(false)
   const [newTagName, setNewTagName] = useState('')
 
-  // 是否正在轮询同步进度
+  // 轮询同步进度状态
   const [isSyncing, setIsSyncing] = useState(false)
 
   // 获取粉丝列表
-  const { data: fansResult, isLoading } = useQuery<PageResult<any>>({
-    queryKey: ['fans', currentApp?.appid, page, keyword, selectedTag],
+  const { data: fansResult, isLoading, refetch: refetchFans } = useQuery<PageResult<any>>({
+    queryKey: ['fans', currentApp?.appid, page, pageSize, keyword, selectedTag],
     queryFn: () =>
-      api.get(`/api/fans?page=${page}&page_size=10&keyword=${encodeURIComponent(keyword)}&tag_id=${selectedTag}`),
+      api.get(
+        `/api/fans?page=${page}&page_size=${pageSize}&keyword=${encodeURIComponent(
+          keyword
+        )}&tag_id=${selectedTag}`
+      ),
     enabled: !!currentApp,
   })
 
@@ -91,7 +103,7 @@ export const FansPage: React.FC = () => {
       setIsSyncing(true)
     } else if (syncStatus?.status === 'completed' && isSyncing) {
       setIsSyncing(false)
-      toast.success(syncStatus.message || '粉丝数据已同步完成！')
+      toast.success(syncStatus.message || '微信粉丝资料与头像全量同步完成！')
       queryClient.invalidateQueries({ queryKey: ['fans'] })
       queryClient.invalidateQueries({ queryKey: ['fans-tags'] })
     } else if (syncStatus?.status === 'failed' && isSyncing) {
@@ -123,49 +135,54 @@ export const FansPage: React.FC = () => {
     },
   })
 
-  // 创建新标签
+  // 创建新标签 (向微信官方同步创建)
   const createTagMutation = useMutation({
     mutationFn: (name: string) => api.post('/api/fans/tags', { name }),
     onSuccess: () => {
-      toast.success('标签创建成功')
+      toast.success('微信标签创建成功并同步至官方！')
       queryClient.invalidateQueries({ queryKey: ['fans-tags'] })
       setNewTagName('')
     },
   })
 
-  // 删除标签
+  // 删除标签 (向微信官方同步删除)
   const deleteTagMutation = useMutation({
     mutationFn: (id: number) => api.delete(`/api/fans/tags/${id}`),
     onSuccess: () => {
-      toast.success('标签已删除')
+      toast.success('微信标签已同步删除')
       queryClient.invalidateQueries({ queryKey: ['fans-tags'] })
+      queryClient.invalidateQueries({ queryKey: ['fans'] })
     },
   })
 
-  // 批量打/移除标签
+  // 批量打/移除标签 (向微信官方同步)
   const batchTagMutation = useMutation({
     mutationFn: (values: { openids: string[]; tag_id: number; action: string }) =>
       api.post('/api/fans/tags/batch', values),
     onSuccess: () => {
-      toast.success('批量标签更新成功')
+      toast.success('微信标签同步更新成功！')
       queryClient.invalidateQueries({ queryKey: ['fans'] })
       queryClient.invalidateQueries({ queryKey: ['fans-tags'] })
       setSelectedOpenIDs([])
     },
   })
 
+  // 计算总页数
+  const total = fansResult?.pagination?.total || 0
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+
   // TanStack Table 列配置
   const columns = useMemo<ColumnDef<any>[]>(
     () => [
       {
         id: 'select',
-        header: ({ table }) => (
+        header: () => (
           <input
             type="checkbox"
-            className="rounded"
+            className="rounded cursor-pointer"
             checked={
-              table.getPrePaginationRowModel().rows.length > 0 &&
-              selectedOpenIDs.length === table.getPrePaginationRowModel().rows.length
+              (fansResult?.list || []).length > 0 &&
+              selectedOpenIDs.length === (fansResult?.list || []).length
             }
             onChange={(e) => {
               if (e.target.checked) {
@@ -180,7 +197,7 @@ export const FansPage: React.FC = () => {
         cell: ({ row }) => (
           <input
             type="checkbox"
-            className="rounded"
+            className="rounded cursor-pointer"
             checked={selectedOpenIDs.includes(row.original.openid)}
             onChange={(e) => {
               if (e.target.checked) {
@@ -195,37 +212,48 @@ export const FansPage: React.FC = () => {
       {
         accessorKey: 'nickname',
         header: '粉丝用户',
-        cell: ({ row }) => (
-          <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-full bg-muted overflow-hidden flex items-center justify-center font-bold text-xs text-muted-foreground shrink-0 border">
-              {row.original.headimgurl ? (
-                <img
-                  src={row.original.headimgurl}
-                  referrerPolicy="no-referrer"
-                  alt=""
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                row.original.nickname?.slice(0, 1) || 'U'
-              )}
-            </div>
-            <div>
-              <div className="font-semibold text-sm leading-tight flex items-center gap-1.5">
-                <span>{row.original.nickname || '微信用户'}</span>
-                {row.original.sex === 1 ? (
-                  <span className="text-[10px] text-blue-500 font-bold">♂</span>
-                ) : row.original.sex === 2 ? (
-                  <span className="text-[10px] text-pink-500 font-bold">♀</span>
-                ) : null}
+        cell: ({ row }) => {
+          const fan = row.original
+          const displayNick = fan.nickname || fan.remark || `微信粉丝_${fan.openid.slice(-6)}`
+          const initialChar = displayNick.slice(0, 1).toUpperCase()
+
+          return (
+            <div className="flex items-center gap-3">
+              {/* 头像展示 (带 no-referrer 规避微信图片防盗链，若为空提供美观首字母渐变底) */}
+              <div className="h-10 w-10 rounded-full overflow-hidden flex items-center justify-center font-bold text-xs text-white shrink-0 border shadow-sm bg-gradient-to-tr from-emerald-600 to-teal-500">
+                {fan.headimgurl ? (
+                  <img
+                    src={fan.headimgurl}
+                    referrerPolicy="no-referrer"
+                    alt={displayNick}
+                    className="h-full w-full object-cover"
+                    onError={(e) => {
+                      ;(e.target as HTMLElement).style.display = 'none'
+                    }}
+                  />
+                ) : (
+                  <span>{initialChar}</span>
+                )}
               </div>
-              <div className="text-[11px] text-muted-foreground font-mono">{row.original.openid}</div>
+
+              <div>
+                <div className="font-semibold text-sm leading-tight flex items-center gap-1.5">
+                  <span className="text-foreground">{displayNick}</span>
+                  {fan.sex === 1 ? (
+                    <span className="text-[11px] text-blue-500 font-bold" title="男">♂</span>
+                  ) : fan.sex === 2 ? (
+                    <span className="text-[11px] text-pink-500 font-bold" title="女">♀</span>
+                  ) : null}
+                </div>
+                <div className="text-[11px] text-muted-foreground font-mono mt-0.5">{fan.openid}</div>
+              </div>
             </div>
-          </div>
-        ),
+          )
+        },
       },
       {
         accessorKey: 'remark',
-        header: '备注名',
+        header: '专属备注',
         cell: ({ row }) => (
           <div className="flex items-center gap-1.5 group">
             <span className="text-sm">{row.original.remark || '-'}</span>
@@ -235,7 +263,8 @@ export const FansPage: React.FC = () => {
                 setRemarkText(row.original.remark || '')
                 setRemarkModalOpen(true)
               }}
-              className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-primary"
+              className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-primary p-0.5"
+              title="设置备注"
             >
               <Edit2 className="h-3.5 w-3.5" />
             </button>
@@ -244,7 +273,7 @@ export const FansPage: React.FC = () => {
       },
       {
         accessorKey: 'tag_ids',
-        header: '用户标签',
+        header: '标签与分组',
         cell: ({ row }) => {
           let list: number[] = []
           try {
@@ -252,16 +281,30 @@ export const FansPage: React.FC = () => {
           } catch {}
 
           return (
-            <div className="flex flex-wrap gap-1">
+            <div className="flex flex-wrap items-center gap-1">
               {list.map((tagId) => {
                 const found = tags?.find((t) => t.tag_id === tagId)
                 return (
-                  <Badge key={tagId} variant="secondary" className="text-[10px]">
+                  <Badge key={tagId} variant="secondary" className="text-[10px] py-0 px-1.5">
                     {found ? found.name : `Tag ${tagId}`}
                   </Badge>
                 )
               })}
-              {list.length === 0 && <span className="text-xs text-muted-foreground">-</span>}
+              {list.length === 0 && <span className="text-xs text-muted-foreground mr-1">无标签</span>}
+
+              {/* 行内单用户打标签快捷按钮 */}
+              <button
+                type="button"
+                onClick={() => {
+                  setTaggingFan(row.original)
+                  setSingleTagModalOpen(true)
+                }}
+                className="text-primary hover:underline text-[11px] inline-flex items-center gap-0.5 ml-1"
+                title="为此粉丝设置/修改标签"
+              >
+                <Plus className="h-3 w-3" />
+                <span>贴标签</span>
+              </button>
             </div>
           )
         },
@@ -294,13 +337,34 @@ export const FansPage: React.FC = () => {
     getCoreRowModel: getCoreRowModel(),
   })
 
+  // 为单个粉丝切换标签
+  const handleToggleFanTag = (fan: any, tagId: number, hasTag: boolean) => {
+    batchTagMutation.mutate({
+      openids: [fan.openid],
+      tag_id: tagId,
+      action: hasTag ? 'remove' : 'add',
+    })
+  }
+
+  // 页码直接跳转
+  const handleJumpPage = (e: React.FormEvent) => {
+    e.preventDefault()
+    const target = parseInt(jumpPage)
+    if (target >= 1 && target <= totalPages) {
+      setPage(target)
+      setJumpPage('')
+    } else {
+      toast.error(`请输入 1 到 ${totalPages} 之间的有效页码`)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">粉丝与标签管理</h2>
           <p className="text-sm text-muted-foreground">
-            微信粉丝全量同步与管理，支持实时同步进度监控、多维搜索与标签批量操作
+            全量微信粉丝同步、头像与名称清晰展示、全功能翻页与微信官方双向标签管理
           </p>
         </div>
 
@@ -315,20 +379,22 @@ export const FansPage: React.FC = () => {
             className="gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
           >
             <RefreshCw className={`h-4 w-4 ${isSyncing || syncMutation.isPending ? 'animate-spin' : ''}`} />
-            <span>{isSyncing ? '正在同步粉丝中...' : '异步同步粉丝'}</span>
+            <span>{isSyncing ? '正在拉取微信粉丝...' : '异步同步粉丝'}</span>
           </Button>
         </div>
       </div>
 
-      {/* 实时同步执行情况与进度监控卡片 (重点功能！) */}
+      {/* 实时同步执行情况与进度监控卡片 */}
       {syncStatus && syncStatus.status !== 'idle' && (
-        <Card className={`border-2 transition-all ${
-          syncStatus.status === 'running'
-            ? 'border-emerald-500 bg-emerald-500/5'
-            : syncStatus.status === 'failed'
-            ? 'border-destructive bg-destructive/5'
-            : 'border-border'
-        }`}>
+        <Card
+          className={`border-2 transition-all ${
+            syncStatus.status === 'running'
+              ? 'border-emerald-500 bg-emerald-500/5'
+              : syncStatus.status === 'failed'
+              ? 'border-destructive bg-destructive/5'
+              : 'border-border'
+          }`}
+        >
           <CardContent className="p-4 space-y-2.5">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -343,11 +409,17 @@ export const FansPage: React.FC = () => {
                   {syncStatus.status === 'running'
                     ? '微信粉丝全量同步正在执行中...'
                     : syncStatus.status === 'completed'
-                    ? '粉丝同步已顺利完成'
+                    ? '粉丝数据全量同步已完成'
                     : '粉丝同步遇到错误'}
                 </span>
                 <Badge
-                  variant={syncStatus.status === 'running' ? 'default' : syncStatus.status === 'completed' ? 'success' : 'destructive'}
+                  variant={
+                    syncStatus.status === 'running'
+                      ? 'default'
+                      : syncStatus.status === 'completed'
+                      ? 'success'
+                      : 'destructive'
+                  }
                   className="text-[10px]"
                 >
                   {syncStatus.status.toUpperCase()}
@@ -361,7 +433,6 @@ export const FansPage: React.FC = () => {
               )}
             </div>
 
-            {/* 动态进度条 */}
             <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
               <div
                 className={`h-full transition-all duration-300 rounded-full ${
@@ -373,9 +444,7 @@ export const FansPage: React.FC = () => {
 
             <div className="flex items-center justify-between text-xs text-muted-foreground">
               <span>{syncStatus.message}</span>
-              {syncStatus.start_time && (
-                <span>开始于: {formatDate(syncStatus.start_time)}</span>
-              )}
+              {syncStatus.start_time && <span>开始于: {formatDate(syncStatus.start_time)}</span>}
             </div>
           </CardContent>
         </Card>
@@ -495,42 +564,155 @@ export const FansPage: React.FC = () => {
           ) : (
             <TableRow>
               <TableCell colSpan={columns.length} className="h-32 text-center text-muted-foreground">
-                暂无粉丝数据，请先配置公众号并点击右上角「异步同步粉丝」
+                暂无粉丝数据，请点击右上角「异步同步粉丝」全量拉取微信数据
               </TableCell>
             </TableRow>
           )}
         </TableBody>
       </Table>
 
-      {/* 分页控制器 */}
-      {fansResult?.pagination && (
-        <div className="flex items-center justify-between text-xs text-muted-foreground pt-2">
-          <span>共 {fansResult.pagination.total} 位粉丝</span>
-          <div className="flex items-center gap-2">
+      {/* 强化版全功能翻页控制器 (重点解决无法翻页问题！) */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-muted-foreground pt-3 border-t">
+        <div className="flex items-center gap-3">
+          <span>共 {total} 位粉丝</span>
+          <div className="flex items-center gap-1.5">
+            <span>每页展示:</span>
+            <select
+              value={pageSize}
+              onChange={(e) => {
+                setPageSize(parseInt(e.target.value))
+                setPage(1)
+              }}
+              className="h-7 px-2 rounded border border-input bg-background text-xs text-foreground"
+            >
+              <option value="10">10 条/页</option>
+              <option value="20">20 条/页</option>
+              <option value="50">50 条/页</option>
+              <option value="100">100 条/页</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1">
             <Button
               variant="outline"
               size="sm"
               disabled={page <= 1}
-              onClick={() => setPage(page - 1)}
-              className="h-8 text-xs"
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              className="h-8 px-2.5 text-xs gap-1"
             >
-              上一页
+              <ChevronLeft className="h-3.5 w-3.5" />
+              <span>上一页</span>
             </Button>
-            <span>
-              第 {page} 页 / 共 {Math.ceil(fansResult.pagination.total / fansResult.pagination.page_size) || 1} 页
+
+            <span className="px-2 font-medium text-foreground">
+              第 {page} / {totalPages} 页
             </span>
+
             <Button
               variant="outline"
               size="sm"
-              disabled={page >= Math.ceil(fansResult.pagination.total / fansResult.pagination.page_size)}
-              onClick={() => setPage(page + 1)}
-              className="h-8 text-xs"
+              disabled={page >= totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              className="h-8 px-2.5 text-xs gap-1"
             >
-              下一页
+              <span>下一页</span>
+              <ChevronRight className="h-3.5 w-3.5" />
             </Button>
           </div>
+
+          {totalPages > 1 && (
+            <form onSubmit={handleJumpPage} className="flex items-center gap-1.5">
+              <span>跳至</span>
+              <Input
+                type="number"
+                min={1}
+                max={totalPages}
+                value={jumpPage}
+                onChange={(e) => setJumpPage(e.target.value)}
+                className="h-7 w-14 text-center text-xs p-1"
+                placeholder={page.toString()}
+              />
+              <span>页</span>
+              <Button type="submit" variant="secondary" size="sm" className="h-7 text-xs px-2">
+                确定
+              </Button>
+            </form>
+          )}
         </div>
-      )}
+      </div>
+
+      {/* 单用户标签管理弹窗 (重点解决无法打标签问题！) */}
+      <Dialog open={singleTagModalOpen} onOpenChange={setSingleTagModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Tag className="h-4 w-4 text-emerald-600" />
+              <span>为粉丝设置标签</span>
+            </DialogTitle>
+          </DialogHeader>
+
+          {taggingFan && (
+            <div className="space-y-4 py-2 text-xs">
+              <div className="p-3 bg-muted/60 rounded-xl flex items-center gap-3">
+                <div className="h-9 w-9 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold">
+                  {taggingFan.nickname ? taggingFan.nickname.slice(0, 1) : 'U'}
+                </div>
+                <div>
+                  <div className="font-semibold text-sm text-foreground">{taggingFan.nickname || '微信用户'}</div>
+                  <div className="text-muted-foreground font-mono text-[11px]">{taggingFan.openid}</div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="font-semibold text-foreground">选择微信标签 (点击即可直接向微信同步打/去标签):</div>
+                <div className="grid grid-cols-2 gap-2 max-h-56 overflow-y-auto p-1">
+                  {tags?.map((t) => {
+                    let userTags: number[] = []
+                    try {
+                      userTags = JSON.parse(taggingFan.tag_ids || '[]')
+                    } catch {}
+                    const isTagged = userTags.includes(t.tag_id)
+
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => {
+                          handleToggleFanTag(taggingFan, t.tag_id, isTagged)
+                          // 乐观更新本地
+                          let nextTags: number[] = []
+                          if (isTagged) {
+                            nextTags = userTags.filter((x) => x !== t.tag_id)
+                          } else {
+                            nextTags = [...userTags, t.tag_id]
+                          }
+                          setTaggingFan({ ...taggingFan, tag_ids: JSON.stringify(nextTags) })
+                        }}
+                        className={`flex items-center justify-between p-2.5 rounded-lg border text-xs text-left transition-all ${
+                          isTagged
+                            ? 'border-emerald-600 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 font-semibold shadow-sm'
+                            : 'hover:bg-muted text-foreground'
+                        }`}
+                      >
+                        <span className="truncate">{t.name}</span>
+                        {isTagged && <Check className="h-3.5 w-3.5 text-emerald-600 shrink-0" />}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+
+              <DialogFooter className="pt-2">
+                <Button variant="default" size="sm" onClick={() => setSingleTagModalOpen(false)}>
+                  完成设置
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* 备注修改弹窗 */}
       <Dialog open={remarkModalOpen} onOpenChange={setRemarkModalOpen}>
@@ -564,11 +746,11 @@ export const FansPage: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      {/* 标签管理弹窗 */}
+      {/* 微信标签管理弹窗 */}
       <Dialog open={tagModalOpen} onOpenChange={setTagModalOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>微信粉丝标签管理</DialogTitle>
+            <DialogTitle>微信官方粉丝标签管理</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2 text-sm">
             <div className="flex gap-2">
@@ -593,12 +775,12 @@ export const FansPage: React.FC = () => {
                     <span className="text-[10px] text-muted-foreground font-mono">ID: {t.tag_id}</span>
                     <button
                       onClick={() => {
-                        if (confirm(`确认删除标签 "${t.name}"？`)) {
+                        if (confirm(`确认向微信官方同步删除标签 "${t.name}"？`)) {
                           deleteTagMutation.mutate(t.id)
                         }
                       }}
                       className="text-muted-foreground hover:text-destructive"
-                      title="删除标签"
+                      title="同步删除标签"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>

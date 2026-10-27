@@ -421,3 +421,147 @@ func (w *WxClient) BatchGetUserInfo(ctx context.Context, openIDs []string) ([]Wx
 
 	return res.UserInfoList, nil
 }
+
+// GetSingleUserInfo 获取单个粉丝详细资料
+func (w *WxClient) GetSingleUserInfo(ctx context.Context, openID string) (*WxUserDetail, error) {
+	token, err := w.GetAccessToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	apiURL := fmt.Sprintf("https://api.weixin.qq.com/cgi-bin/user/info?access_token=%s&openid=%s&lang=zh_CN", token, openID)
+	resp, err := w.http.R().SetContext(ctx).Get(apiURL)
+	if err != nil {
+		return nil, err
+	}
+
+	var res struct {
+		WxUserDetail
+		Errcode int    `json:"errcode"`
+		Errmsg  string `json:"errmsg"`
+	}
+	if err := json.Unmarshal(resp.Body(), &res); err != nil {
+		return nil, err
+	}
+	if res.Errcode != 0 {
+		return nil, fmt.Errorf("get user info failed: [%d] %s", res.Errcode, res.Errmsg)
+	}
+
+	return &res.WxUserDetail, nil
+}
+
+// CreateWxTag 向微信官方创建新标签并获取微信分配的 tag_id
+func (w *WxClient) CreateWxTag(ctx context.Context, name string) (int, error) {
+	token, err := w.GetAccessToken(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	apiURL := fmt.Sprintf("https://api.weixin.qq.com/cgi-bin/tags/create?access_token=%s", token)
+	resp, err := w.http.R().SetContext(ctx).SetBody(map[string]interface{}{
+		"tag": map[string]string{"name": name},
+	}).Post(apiURL)
+	if err != nil {
+		return 0, err
+	}
+
+	var res struct {
+		Tag struct {
+			ID   int    `json:"id"`
+			Name string `json:"name"`
+		} `json:"tag"`
+		Errcode int    `json:"errcode"`
+		Errmsg  string `json:"errmsg"`
+	}
+	if err := json.Unmarshal(resp.Body(), &res); err != nil {
+		return 0, err
+	}
+	if res.Errcode != 0 {
+		return 0, fmt.Errorf("create tag failed: [%d] %s", res.Errcode, res.Errmsg)
+	}
+
+	return res.Tag.ID, nil
+}
+
+// DeleteWxTag 向微信官方删除标签
+func (w *WxClient) DeleteWxTag(ctx context.Context, tagID int) error {
+	token, err := w.GetAccessToken(ctx)
+	if err != nil {
+		return err
+	}
+
+	apiURL := fmt.Sprintf("https://api.weixin.qq.com/cgi-bin/tags/delete?access_token=%s", token)
+	resp, err := w.http.R().SetContext(ctx).SetBody(map[string]interface{}{
+		"tag": map[string]int{"id": tagID},
+	}).Post(apiURL)
+	if err != nil {
+		return err
+	}
+
+	var res struct {
+		Errcode int    `json:"errcode"`
+		Errmsg  string `json:"errmsg"`
+	}
+	_ = json.Unmarshal(resp.Body(), &res)
+	if res.Errcode != 0 {
+		return fmt.Errorf("delete tag failed: [%d] %s", res.Errcode, res.Errmsg)
+	}
+
+	return nil
+}
+
+// BatchTaggingMembers 向微信官方给粉丝批量打标签
+func (w *WxClient) BatchTaggingMembers(ctx context.Context, tagID int, openIDs []string) error {
+	token, err := w.GetAccessToken(ctx)
+	if err != nil {
+		return err
+	}
+
+	apiURL := fmt.Sprintf("https://api.weixin.qq.com/cgi-bin/tags/members/batchtagging?access_token=%s", token)
+	resp, err := w.http.R().SetContext(ctx).SetBody(map[string]interface{}{
+		"openid_list": openIDs,
+		"tagid":       tagID,
+	}).Post(apiURL)
+	if err != nil {
+		return err
+	}
+
+	var res struct {
+		Errcode int    `json:"errcode"`
+		Errmsg  string `json:"errmsg"`
+	}
+	_ = json.Unmarshal(resp.Body(), &res)
+	if res.Errcode != 0 {
+		return fmt.Errorf("batchtagging failed: [%d] %s", res.Errcode, res.Errmsg)
+	}
+
+	return nil
+}
+
+// BatchUntaggingMembers 向微信官方批量为粉丝取消标签
+func (w *WxClient) BatchUntaggingMembers(ctx context.Context, tagID int, openIDs []string) error {
+	token, err := w.GetAccessToken(ctx)
+	if err != nil {
+		return err
+	}
+
+	apiURL := fmt.Sprintf("https://api.weixin.qq.com/cgi-bin/tags/members/batchuntagging?access_token=%s", token)
+	resp, err := w.http.R().SetContext(ctx).SetBody(map[string]interface{}{
+		"openid_list": openIDs,
+		"tagid":       tagID,
+	}).Post(apiURL)
+	if err != nil {
+		return err
+	}
+
+	var res struct {
+		Errcode int    `json:"errcode"`
+		Errmsg  string `json:"errmsg"`
+	}
+	_ = json.Unmarshal(resp.Body(), &res)
+	if res.Errcode != 0 {
+		return fmt.Errorf("batchuntagging failed: [%d] %s", res.Errcode, res.Errmsg)
+	}
+
+	return nil
+}

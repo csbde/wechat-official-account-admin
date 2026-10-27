@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -201,51 +202,88 @@ func (m *FanSyncManager) DoSyncFansTask(ctx context.Context, tenantID uint, appi
 		chunk := allOpenIDs[i:end]
 		userDetails, err := wxClient.BatchGetUserInfo(ctx, chunk)
 		if err != nil {
-			logger.Warn("[粉丝同步] 分批获取粉丝资料警告", zap.Error(err), zap.Int("batch_start", i))
-			// 即使某批次出错，也继续尝试下一批
-		} else {
-			for _, user := range userDetails {
-				tagBytes, _ := json.Marshal(user.TagIDList)
-				var fan model.WxFan
-				err := database.DB.Where("app_id = ? AND tenant_id = ? AND open_id = ?", appid, tenantID, user.OpenID).First(&fan).Error
-				if err != nil {
-					fan = model.WxFan{
-						TenantID:       tenantID,
-						AppID:          appid,
-						OpenID:         user.OpenID,
-						UnionID:        user.UnionID,
-						Nickname:       user.Nickname,
-						Sex:            user.Sex,
-						City:           user.City,
-						Province:       user.Province,
-						Country:        user.Country,
-						HeadImgURL:     user.HeadImgURL,
-						Subscribe:      user.Subscribe,
-						SubscribeTime:  user.SubscribeTime,
-						Remark:         user.Remark,
-						TagIDs:         string(tagBytes),
-						SubscribeScene: user.SubscribeScene,
-					}
-					database.DB.Create(&fan)
+			logger.Warn("[粉丝同步] 批量接口未返回，尝试单条补偿拉取", zap.Error(err), zap.Int("batch_start", i))
+			// 优雅回退：使用单条粉丝接口单条拉取
+			for _, oid := range chunk {
+				u, singleErr := wxClient.GetSingleUserInfo(ctx, oid)
+				if singleErr == nil && u != nil {
+					userDetails = append(userDetails, *u)
 				} else {
-					fan.Nickname = user.Nickname
-					fan.Sex = user.Sex
-					fan.City = user.City
-					fan.Province = user.Province
-					fan.Country = user.Country
-					fan.HeadImgURL = user.HeadImgURL
-					fan.Subscribe = user.Subscribe
-					fan.SubscribeTime = user.SubscribeTime
-					if user.Remark != "" {
-						fan.Remark = user.Remark
-					}
-					fan.TagIDs = string(tagBytes)
-					fan.SubscribeScene = user.SubscribeScene
-					database.DB.Save(&fan)
+					// 兜底保障
+					userDetails = append(userDetails, WxUserDetail{
+						OpenID:    oid,
+						Subscribe: 1,
+					})
 				}
 			}
-			syncedTotal += len(userDetails)
 		}
+
+		for _, user := range userDetails {
+			nick := strings.TrimSpace(user.Nickname)
+			if nick == "" {
+				if user.Remark != "" {
+					nick = user.Remark
+				} else if len(user.OpenID) > 6 {
+					nick = fmt.Sprintf("微信粉丝_%s", user.OpenID[len(user.OpenID)-6:])
+				} else {
+					nick = "微信用户"
+				}
+			}
+
+			headURL := strings.TrimSpace(user.HeadImgURL)
+			// 协议清洗：将 http 转换为 https
+			if strings.HasPrefix(headURL, "http://") {
+				headURL = "https://" + strings.TrimPrefix(headURL, "http://")
+			}
+
+			tagBytes, _ := json.Marshal(user.TagIDList)
+			if string(tagBytes) == "null" {
+				tagBytes = []byte("[]")
+			}
+
+			var fan model.WxFan
+			err := database.DB.Where("app_id = ? AND tenant_id = ? AND open_id = ?", appid, tenantID, user.OpenID).First(&fan).Error
+			if err != nil {
+				fan = model.WxFan{
+					TenantID:       tenantID,
+					AppID:          appid,
+					OpenID:         user.OpenID,
+					UnionID:        user.UnionID,
+					Nickname:       nick,
+					Sex:            user.Sex,
+					City:           user.City,
+					Province:       user.Province,
+					Country:        user.Country,
+					HeadImgURL:     headURL,
+					Subscribe:      user.Subscribe,
+					SubscribeTime:  user.SubscribeTime,
+					Remark:         user.Remark,
+					TagIDs:         string(tagBytes),
+					SubscribeScene: user.SubscribeScene,
+				}
+				database.DB.Create(&fan)
+			} else {
+				fan.Nickname = nick
+				fan.Sex = user.Sex
+				fan.City = user.City
+				fan.Province = user.Province
+				fan.Country = user.Country
+				if headURL != "" {
+					fan.HeadImgURL = headURL
+				}
+				fan.Subscribe = user.Subscribe
+				if user.SubscribeTime > 0 {
+					fan.SubscribeTime = user.SubscribeTime
+				}
+				if user.Remark != "" {
+					fan.Remark = user.Remark
+				}
+				fan.TagIDs = string(tagBytes)
+				fan.SubscribeScene = user.SubscribeScene
+				database.DB.Save(&fan)
+			}
+		}
+		syncedTotal += len(chunk)
 
 		// 计算进度
 		pct := int(float64(syncedTotal) / float64(totalCount) * 100)

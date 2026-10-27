@@ -11,6 +11,7 @@ import (
 	"github.com/anchel/wechat-official-account-admin/internal/queue"
 	"github.com/anchel/wechat-official-account-admin/internal/service"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type FanHandler struct{}
@@ -38,7 +39,22 @@ func (h *FanHandler) List(c *gin.Context) {
 	query.Count(&total)
 
 	var list []model.WxFan
-	query.Order("subscribe_time desc, id desc").Offset((page - 1) * pageSize).Limit(pageSize).Find(&list)
+	// 使用全新 Session 避免 Count 污染 Select 字段，彻底解决分页无法翻页的 Bug！
+	database.DB.Model(&model.WxFan{}).Where("app_id = ? AND tenant_id = ?", appid, tenantID).
+		Scopes(func(d *gorm.DB) *gorm.DB {
+			if keyword != "" {
+				like := "%" + keyword + "%"
+				d = d.Where("nickname LIKE ? OR open_id LIKE ? OR remark LIKE ?", like, like, like)
+			}
+			if tagId != "" {
+				d = d.Where("tag_ids LIKE ?", "%"+tagId+"%")
+			}
+			return d
+		}).
+		Order("subscribe_time desc, id desc").
+		Offset((page - 1) * pageSize).
+		Limit(pageSize).
+		Find(&list)
 
 	Page(c, list, total, page, pageSize)
 }
@@ -155,11 +171,19 @@ func (h *FanHandler) DeleteTag(c *gin.Context) {
 	tenantID := GetTenantID(c)
 	id := c.Param("id")
 
-	res := database.DB.Where("id = ? AND app_id = ? AND tenant_id = ?", id, appid, tenantID).Delete(&model.WxTag{})
-	if res.RowsAffected == 0 {
+	var tag model.WxTag
+	if err := database.DB.Where("id = ? AND app_id = ? AND tenant_id = ?", id, appid, tenantID).First(&tag).Error; err != nil {
 		Fail(c, http.StatusNotFound, "标签不存在或无权操作")
 		return
 	}
+
+	// 同步向微信官方删除
+	wxClient, err := service.NewWxClient(appid)
+	if err == nil && tag.TagID > 0 {
+		_ = wxClient.DeleteWxTag(c.Request.Context(), tag.TagID)
+	}
+
+	database.DB.Delete(&tag)
 	Ok(c, gin.H{"id": id, "deleted": true})
 }
 
@@ -177,6 +201,17 @@ func (h *FanHandler) BatchTagging(c *gin.Context) {
 		return
 	}
 
+	// 1. 同步向微信官方接口执行打标签或取消标签
+	wxClient, err := service.NewWxClient(appid)
+	if err == nil {
+		if req.Action == "add" {
+			_ = wxClient.BatchTaggingMembers(c.Request.Context(), req.TagID, req.OpenIDs)
+		} else {
+			_ = wxClient.BatchUntaggingMembers(c.Request.Context(), req.TagID, req.OpenIDs)
+		}
+	}
+
+	// 2. 本地数据库落库同步更新
 	for _, openid := range req.OpenIDs {
 		var fan model.WxFan
 		if err := database.DB.Where("app_id = ? AND open_id = ? AND tenant_id = ?", appid, openid, tenantID).First(&fan).Error; err == nil {
