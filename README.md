@@ -133,6 +133,7 @@
     - **公众号模板消息**：查询/设置所属行业 (`template/get_industry`、`api_set_industry`)、从公共模板库选用模板 (`api_add_template`，支持指定关键词组合)、查看与删除我的模板库 (`get_all_private_template`、`del_private_template`)、发送模板消息 (`message/template/send`，支持 `url`、跳转小程序 `miniprogram`、防重入 `client_msg_id` 与字体颜色)、一次性订阅下发 (`message/template/subscribe`)、查询被拦截的模板消息 (`wxa/sec/queryblocktmplmsg`)。
     - **订阅消息 (小程序 · 服务号)**：拉取类目 (`wxaapi/newtmpl/getcategory`) → 分页浏览公共模板库 (`getpubtemplatetitles`) → 查看关键词 (`getpubtemplatekeywords`) → 勾选 2~5 个关键词加入我的模板库 (`addtemplate` 返回 `priTmplId`) → 我的订阅模板列表与删除 (`gettemplate`、`deltemplate`) → 发送 (`message/subscribe/send`，可选 `formal/trial/developer` 版本与跳转页) 或服务号一次性订阅下发 (`message/subscribe/bizsend`)。
     - **智能表单**：自动解析模板 `content` 中的 `{{xxx.DATA}}` 占位，动态生成关键词输入框，并以模板 `example` 作为填写示例，避免 47003 (参数格式不符) 类错误。
+    - **加载状态可诊断**：类目列表、公共模板库、我的模板库、模板关键词、行业信息等每一处拉取都区分「加载中 / 失败原因 / 空数据」三态，失败时直接显示微信返回的中文处置建议并提供「重试」按钮，不会再出现一直卡在"正在拉取…"却查不到原因的界面。
 
 16. **群发消息与服务提醒卡片 (Mass Messaging & Service Card)**:
     - 同页面新增「群发消息」「服务提醒卡片」两个标签页，接口统一位于 `/api/notify/mass/*` 与 `/api/notify/sub/service-card*`，全部经过 `TenantAppID` 租户校验 (跨租户 appid 直接 403)，参数类错误返回 400、微信侧错误返回 500。

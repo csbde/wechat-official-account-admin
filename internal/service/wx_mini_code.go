@@ -23,7 +23,12 @@ func (s *WxMiniService) tokenForMiniApp(ctx context.Context, miniAppID string) (
 	if err != nil {
 		return "", err
 	}
-	return wxClient.GetAccessToken(ctx)
+	token, err := wxClient.GetAccessToken(ctx)
+	if err != nil {
+		// 凭据类错误同样补充中文处置建议 (AppSecret 错误 / IP 未白名单 / 授权失效等)
+		return "", FriendlyWxError(err)
+	}
+	return token, nil
 }
 
 // callMiniJSON 统一发起小程序侧 JSON 接口调用，并校验微信 errcode

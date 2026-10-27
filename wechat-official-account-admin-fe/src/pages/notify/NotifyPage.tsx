@@ -21,6 +21,9 @@ import { toast } from 'sonner'
 import { MassPanel } from './MassPanel'
 import { ServiceCardPanel } from './ServiceCardPanel'
 
+/** 从 react-query 的 error 中取可读文案 (axios 拦截器已把后端 message 包成 Error) */
+const errText = (e: any) => String(e?.message || '请求失败').replace(/^Error:\s*/, '')
+
 /** 解析模板 content 中的 {{key.DATA}} 占位，生成可填写的表单字段 */
 function parseTemplate(content?: string, example?: string) {
   const lines = (content || '').split('\n').map((l) => l.trim()).filter(Boolean)
@@ -46,15 +49,20 @@ export const NotifyPage: React.FC = () => {
   const [tab, setTab] = useState<'oa' | 'sub' | 'mass' | 'card'>('oa')
 
   /* ============================ 公众号模板消息 ============================ */
-  const { data: industry } = useQuery<any>({
+  const { data: industry, isError: indError, error: indErr } = useQuery<any>({
     queryKey: ['notify', currentApp?.appid, 'industry'],
     queryFn: () => api.get('/api/notify/oa/industry'),
     enabled: !!currentApp && tab === 'oa',
+    retry: 0,
   })
-  const { data: oaTemplates, isFetching: fetchingOa } = useQuery<any[]>({
+  const {
+    data: oaTemplates, isFetching: fetchingOa, isLoading: loadingOa,
+    isError: oaError, error: oaErr, refetch: refetchOa,
+  } = useQuery<any[]>({
     queryKey: ['notify', currentApp?.appid, 'oa-templates'],
     queryFn: () => api.get('/api/notify/oa/templates'),
     enabled: !!currentApp && tab === 'oa',
+    retry: 0,
   })
 
   const [ind1, setInd1] = useState('')
@@ -121,28 +129,40 @@ export const NotifyPage: React.FC = () => {
   const [subPage, setSubPage] = useState(0)
   const subLimit = 30
 
-  const { data: subCats } = useQuery<any[]>({
+  const {
+    data: subCats, isLoading: loadingCats, isError: catsError, error: catsErr, refetch: refetchCats,
+  } = useQuery<any[]>({
     queryKey: ['notify', currentApp?.appid, 'sub-categories'],
     queryFn: () => api.get('/api/notify/sub/categories'),
     enabled: !!currentApp && tab === 'sub',
+    retry: 0,
   })
-  const { data: pubTitles, isFetching: fetchingPub } = useQuery<any>({
+  const {
+    data: pubTitles, isFetching: fetchingPub, isError: pubError, error: pubErr, refetch: refetchPub,
+  } = useQuery<any>({
     queryKey: ['notify', currentApp?.appid, 'sub-pub', subCatIds.join(','), subPage],
     queryFn: () => api.get(`/api/notify/sub/pub-titles?ids=${subCatIds.join(',')}&start=${subPage * subLimit}&limit=${subLimit}`),
     enabled: !!currentApp && tab === 'sub' && subCatIds.length > 0,
+    retry: 0,
   })
-  const { data: subMine, isFetching: fetchingMine } = useQuery<any[]>({
+  const {
+    data: subMine, isFetching: fetchingMine, isError: mineError, error: mineErr, refetch: refetchMine,
+  } = useQuery<any[]>({
     queryKey: ['notify', currentApp?.appid, 'sub-mine'],
     queryFn: () => api.get('/api/notify/sub/templates'),
     enabled: !!currentApp && tab === 'sub',
+    retry: 0,
   })
 
   const [addSubOpen, setAddSubOpen] = useState(false)
   const [addSubTmpl, setAddSubTmpl] = useState<any>(null)
-  const { data: subKeywords } = useQuery<any[]>({
+  const {
+    data: subKeywords, isLoading: loadingKids, isError: kidsError, error: kidsErr, refetch: refetchKids,
+  } = useQuery<any[]>({
     queryKey: ['notify', currentApp?.appid, 'sub-kids', addSubTmpl?.tid],
-    queryFn: () => api.get(`/api/notify/sub/pub-keywords?tid=${addSubTmpl.tid}`),
+    queryFn: () => api.get(`/api/notify/sub/pub-keywords?tid=${addSubTmpl?.tid}`),
     enabled: !!addSubTmpl,
+    retry: 0,
   })
   const [pickedKids, setPickedKids] = useState<number[]>([])
   const [sceneDesc, setSceneDesc] = useState('')
@@ -264,8 +284,14 @@ export const NotifyPage: React.FC = () => {
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">所属行业</CardTitle>
                 <CardDescription className="text-xs">
-                  当前: {industry?.primary_industry?.first_class || '未设置'} / {industry?.primary_industry?.second_class || '-'}
-                  {' · '}副行业: {industry?.secondary_industry?.first_class || '-'} / {industry?.secondary_industry?.second_class || '-'}
+                  {indError ? (
+                    <span className="text-red-600">行业信息获取失败: {errText(indErr)}</span>
+                  ) : (
+                    <>
+                      当前: {industry?.primary_industry?.first_class || '未设置'} / {industry?.primary_industry?.second_class || '-'}
+                      {' · '}副行业: {industry?.secondary_industry?.first_class || '-'} / {industry?.secondary_industry?.second_class || '-'}
+                    </>
+                  )}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3 text-xs">
@@ -347,6 +373,17 @@ export const NotifyPage: React.FC = () => {
                 <TableBody>
                   {fetchingOa && !oaTemplates ? (
                     <TableRow><TableCell colSpan={5} className="h-28 text-center text-muted-foreground">加载中...</TableCell></TableRow>
+                  ) : oaError ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="h-28 text-center text-red-600 break-words">
+                        模板库获取失败: {errText(oaErr)}
+                        <Button size="sm" variant="outline" className="ml-3 h-7 text-[11px] gap-1" onClick={() => refetchOa()}>
+                          <RefreshCw className="h-3 w-3" />重试
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ) : loadingOa ? (
+                    <TableRow><TableCell colSpan={5} className="h-28 text-center text-muted-foreground">正在加载模板库...</TableCell></TableRow>
                   ) : oaTemplates && oaTemplates.length > 0 ? (
                     oaTemplates.map((t: any) => (
                       <TableRow key={t.template_id} className="text-xs">
@@ -439,7 +476,30 @@ export const NotifyPage: React.FC = () => {
                     {cat.name} <span className="font-mono opacity-70">#{cat.id}</span>
                   </button>
                 ))}
-                {!subCats?.length && <span className="text-muted-foreground p-2">正在拉取类目列表...</span>}
+                {!subCats?.length && (
+                  <div className="w-full p-1.5 text-[11px] leading-relaxed">
+                    {loadingCats ? (
+                      <span className="text-muted-foreground">正在拉取类目列表...</span>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {catsError ? (
+                          <div className="text-red-600 break-words">类目列表获取失败: {errText(catsErr)}</div>
+                        ) : (
+                          <div className="text-amber-700 dark:text-amber-400 break-words">
+                            微信未返回任何订阅消息类目。常见原因：该账号尚未在公众平台<strong>开通「订阅消息」能力</strong>
+                            (小程序需在「订阅消息」中开通类目；服务号需已通过微信认证)，或当前选中的是不支持类目接口的公众号。
+                          </div>
+                        )}
+                        <div className="flex items-center gap-2">
+                          <Button size="sm" variant="outline" className="h-7 text-[11px] gap-1" onClick={() => refetchCats()}>
+                            <RefreshCw className="h-3 w-3" />重新拉取类目
+                          </Button>
+                          <span className="text-[10px] text-muted-foreground">接口: wxaapi/newtmpl/getcategory</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {subCatIds.length === 0 ? (
@@ -457,8 +517,17 @@ export const NotifyPage: React.FC = () => {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {fetchingPub ? (
+                      {fetchingPub && !pubError ? (
                         <TableRow><TableCell colSpan={5} className="h-24 text-center text-muted-foreground">拉取中...</TableCell></TableRow>
+                      ) : pubError ? (
+                        <TableRow>
+                          <TableCell colSpan={5} className="h-24 text-center text-red-600 break-words">
+                            公共模板拉取失败: {errText(pubErr)}
+                            <Button size="sm" variant="outline" className="ml-3 h-7 text-[11px] gap-1" onClick={() => refetchPub()}>
+                              <RefreshCw className="h-3 w-3" />重试
+                            </Button>
+                          </TableCell>
+                        </TableRow>
                       ) : pubTitles?.list?.length ? (
                         pubTitles.list.map((t: any) => (
                           <TableRow key={t.tid} className="text-xs">
@@ -477,7 +546,12 @@ export const NotifyPage: React.FC = () => {
                           </TableRow>
                         ))
                       ) : (
-                        <TableRow><TableCell colSpan={5} className="h-24 text-center text-muted-foreground">该类目下暂无公共模板</TableCell></TableRow>
+                        <TableRow>
+                          <TableCell colSpan={5} className="h-24 text-center text-muted-foreground leading-relaxed">
+                            该类目下暂无可用公共模板。可尝试<strong>更换/增加已选类目</strong>，
+                            或确认该账号在公众平台已开通对应类目的订阅消息权限。
+                          </TableCell>
+                        </TableRow>
                       )}
                     </TableBody>
                   </Table>
@@ -550,8 +624,21 @@ export const NotifyPage: React.FC = () => {
                         </TableCell>
                       </TableRow>
                     ))
+                  ) : mineError ? (
+                    <TableRow>
+                      <TableCell colSpan={5} className="h-24 text-center text-red-600 break-words">
+                        我的订阅模板获取失败: {errText(mineErr)}
+                        <Button size="sm" variant="outline" className="ml-3 h-7 text-[11px] gap-1" onClick={() => refetchMine()}>
+                          <RefreshCw className="h-3 w-3" />重试
+                        </Button>
+                      </TableCell>
+                    </TableRow>
                   ) : (
-                    <TableRow><TableCell colSpan={5} className="h-24 text-center text-muted-foreground">尚未添加任何订阅模板</TableCell></TableRow>
+                    <TableRow>
+                      <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
+                        尚未添加任何订阅模板，请在上方「1) 选择类目并拉取公共模板库」中勾选关键词添加
+                      </TableCell>
+                    </TableRow>
                   )}
                 </TableBody>
               </Table>
@@ -644,7 +731,22 @@ export const NotifyPage: React.FC = () => {
               </div>
               <div className="space-y-1.5">
                 <div className="font-semibold">勾选关键词 (至少 2 个，至多 5 个)</div>
-                {!subKeywords?.length && <div className="text-muted-foreground py-3 text-center">正在拉取关键词...</div>}
+                {!subKeywords?.length && (
+                  <div className="py-3 text-center text-[11px] space-y-1.5">
+                    {loadingKids ? (
+                      <div className="text-muted-foreground">正在拉取关键词...</div>
+                    ) : kidsError ? (
+                      <>
+                        <div className="text-red-600 break-words">关键词获取失败: {errText(kidsErr)}</div>
+                        <Button size="sm" variant="outline" className="h-7 text-[11px] gap-1" onClick={() => refetchKids()}>
+                          <RefreshCw className="h-3 w-3" />重试
+                        </Button>
+                      </>
+                    ) : (
+                      <div className="text-muted-foreground">该模板未返回任何关键词，无法添加，请换一个模板</div>
+                    )}
+                  </div>
+                )}
                 {(subKeywords || []).map((k: any) => (
                   <label key={k.kid} className="flex items-center gap-2 p-2 rounded-lg border hover:bg-muted/40 cursor-pointer">
                     <input type="checkbox" className="h-3.5 w-3.5" checked={pickedKids.includes(k.kid)}
