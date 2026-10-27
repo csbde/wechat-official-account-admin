@@ -13,7 +13,7 @@ import (
 	"github.com/anchel/wechat-official-account-admin/internal/database"
 	"github.com/anchel/wechat-official-account-admin/internal/logger"
 	"github.com/anchel/wechat-official-account-admin/internal/model"
-	"github.com/go-resty/resty/v2"
+		"github.com/go-resty/resty/v2"
 	"go.uber.org/zap"
 )
 
@@ -332,12 +332,22 @@ func (s *WxOpenService) RefreshAuthorizerToken(ctx context.Context, componentApp
 			Update("authorizer_refresh_token", res.AuthorizerRefreshToken)
 	}
 
-	if cache.RDB != nil && res.AuthorizerAccessToken != "" {
-		ttl := time.Duration(res.ExpiresIn-300) * time.Second
-		if ttl <= 0 {
-			ttl = 60 * time.Second
+	if res.AuthorizerAccessToken != "" {
+		safeTTL := time.Duration(res.ExpiresIn-300) * time.Second
+		if safeTTL <= 0 {
+			safeTTL = 60 * time.Second
 		}
-		_ = cache.RDB.Set(ctx, cacheKey, res.AuthorizerAccessToken, ttl).Err()
+		cache.GetGateCacheManager().Set(fmt.Sprintf("client_token:%s", authorizerAppID), &cache.TokenCacheItem{
+			AccessToken: res.AuthorizerAccessToken,
+			ExpiresIn:   res.ExpiresIn,
+			ExpireTime:  time.Now().Add(safeTTL),
+			AppID:       authorizerAppID,
+			CreatedAt:   time.Now(),
+		}, safeTTL)
+
+		if cache.RDB != nil {
+			_ = cache.RDB.Set(ctx, cacheKey, res.AuthorizerAccessToken, safeTTL).Err()
+		}
 	}
 
 	return res.AuthorizerAccessToken, nil

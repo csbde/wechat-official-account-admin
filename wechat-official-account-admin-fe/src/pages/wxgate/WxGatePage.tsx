@@ -60,7 +60,7 @@ export const WxGatePage: React.FC = () => {
       setLoadingJSSDK(true)
       const appQuery = currentApp?.appid ? `&appid=${currentApp.appid}` : ''
       const res: any = await api.get(`/api/jssdk/config?url=${encodeURIComponent(testUrl)}${appQuery}`)
-      setJssdkResult(res.data)
+      setJssdkResult(res?.data || res)
       toast.success('JSSDK 签名生成成功！')
     } catch (e: any) {
       toast.error(e.message || '获取配置失败')
@@ -117,10 +117,10 @@ export const WxGatePage: React.FC = () => {
           </CardHeader>
           <CardContent className="space-y-1">
             <div className="text-2xl font-bold font-mono">
-              {gateStats?.data?.cache?.l1_memory_items ?? 0} 个凭证活跃
+              {(gateStats?.cache?.l1_memory_items ?? gateStats?.data?.cache?.l1_memory_items) ?? 0} 个凭证活跃
             </div>
             <p className="text-xs text-muted-foreground">
-              L1 本地内存读写锁 + L2 Redis: {gateStats?.data?.cache?.l2_redis_online ? '已联网' : '内存自适应'}
+              L1 本地内存读写锁 + L2 Redis: {(gateStats?.cache?.l2_redis_online ?? gateStats?.data?.cache?.l2_redis_online) ? '已联网' : '内存自适应'}
             </p>
           </CardContent>
         </Card>
@@ -134,7 +134,7 @@ export const WxGatePage: React.FC = () => {
           </CardHeader>
           <CardContent className="space-y-1">
             <div className="text-2xl font-bold font-mono">
-              {gateStats?.data?.sessions?.active_sessions ?? 0}
+              {(gateStats?.sessions?.active_sessions ?? gateStats?.data?.sessions?.active_sessions) ?? 0}
             </div>
             <p className="text-xs text-muted-foreground">支持任意外部 redirect_uri 授权中转与信息直传</p>
           </CardContent>

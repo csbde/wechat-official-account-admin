@@ -17,8 +17,9 @@ type SessionData struct {
 }
 
 type GateSessionManager struct {
-	sessions map[string]*SessionData
-	mutex    sync.RWMutex
+	sessions    map[string]*SessionData
+	totalCount  int64
+	mutex       sync.RWMutex
 }
 
 var (
@@ -56,6 +57,7 @@ func (sm *GateSessionManager) CreateSession(appID, originalRedirectURI, original
 
 	sm.mutex.Lock()
 	sm.sessions[sessionID] = data
+	sm.totalCount++
 	sm.mutex.Unlock()
 
 	return sessionID, nil
@@ -106,5 +108,6 @@ func (sm *GateSessionManager) GetStats() map[string]interface{} {
 	defer sm.mutex.RUnlock()
 	return map[string]interface{}{
 		"active_sessions": len(sm.sessions),
+		"total_transfers": sm.totalCount,
 	}
 }

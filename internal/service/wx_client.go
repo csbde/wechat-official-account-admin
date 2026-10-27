@@ -14,7 +14,7 @@ import (
 	"github.com/anchel/wechat-official-account-admin/internal/cache"
 	"github.com/anchel/wechat-official-account-admin/internal/database"
 	"github.com/anchel/wechat-official-account-admin/internal/model"
-	"github.com/go-resty/resty/v2"
+		"github.com/go-resty/resty/v2"
 )
 
 type WxClient struct {
@@ -69,43 +69,29 @@ func (w *WxClient) GetAccessToken(ctx context.Context) (string, error) {
 		)
 	}
 
-	// 否则走普通直连模式
-	cacheKey := fmt.Sprintf("wx:access_token:%s", w.AppID)
-	if cache.RDB != nil {
-		val, err := cache.RDB.Get(ctx, cacheKey).Result()
-		if err == nil && val != "" {
-			return val, nil
+	// 统一接入 WXGate 两级高速凭证池与防穿透单飞合并
+	return cache.GetGateCacheManager().GetOrFetchClientAccessToken(ctx, w.AppID, func() (string, int, error) {
+		url := fmt.Sprintf("https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=%s&secret=%s", w.AppID, w.AppSecret)
+		resp, err := w.http.R().SetContext(ctx).Get(url)
+		if err != nil {
+			return "", 0, err
 		}
-	}
 
-	url := fmt.Sprintf("https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid=%s&secret=%s", w.AppID, w.AppSecret)
-	resp, err := w.http.R().SetContext(ctx).Get(url)
-	if err != nil {
-		return "", err
-	}
-
-	var res struct {
-		AccessToken string `json:"access_token"`
-		ExpiresIn   int    `json:"expires_in"`
-		Errcode     int    `json:"errcode"`
-		Errmsg      string `json:"errmsg"`
-	}
-	if err := json.Unmarshal(resp.Body(), &res); err != nil {
-		return "", err
-	}
-	if res.Errcode != 0 {
-		return "", fmt.Errorf("wechat get token failed: [%d] %s", res.Errcode, res.Errmsg)
-	}
-
-	if cache.RDB != nil && res.AccessToken != "" {
-		ttl := time.Duration(res.ExpiresIn-300) * time.Second
-		if ttl <= 0 {
-			ttl = 60 * time.Second
+		var res struct {
+			AccessToken string `json:"access_token"`
+			ExpiresIn   int    `json:"expires_in"`
+			Errcode     int    `json:"errcode"`
+			Errmsg      string `json:"errmsg"`
 		}
-		_ = cache.RDB.Set(ctx, cacheKey, res.AccessToken, ttl).Err()
-	}
+		if err := json.Unmarshal(resp.Body(), &res); err != nil {
+			return "", 0, err
+		}
+		if res.Errcode != 0 {
+			return "", 0, fmt.Errorf("wechat get token failed: [%d] %s", res.Errcode, res.Errmsg)
+		}
 
-	return res.AccessToken, nil
+		return res.AccessToken, res.ExpiresIn, nil
+	})
 }
 
 // GetWxMenu 获取微信服务器已发布的菜单
