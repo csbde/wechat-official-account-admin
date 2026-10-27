@@ -36,6 +36,7 @@ import {
   Key,
   Link2,
   Unlink,
+  Rocket,
   Library,
   Trash2,
   ChevronLeft,
@@ -44,6 +45,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatDate } from '@/lib/utils'
+import { CodeManagePanel } from './CodeManagePanel'
 
 /** 关联状态字典 (微信官方 wxamplinkget 定义) */
 const LINK_STATUS: Record<number, { label: string; cls: string }> = {
@@ -65,6 +67,7 @@ const MINI_TABS = [
   { value: 'register', label: '快速注册任务', icon: Sparkles, color: 'text-amber-500' },
   { value: 'linked', label: '公众号关联小程序', icon: Link2, color: 'text-sky-500' },
   { value: 'templates', label: '小程序代码模板库', icon: Library, color: 'text-violet-500' },
+  { value: 'code', label: '代码发布管理', icon: Rocket, color: 'text-rose-500' },
   { value: 'domain', label: '合法域名配置', icon: Globe, color: 'text-blue-500' },
   { value: 'code2session', label: '登录网关', icon: Key, color: 'text-emerald-500' },
 ] as const
@@ -292,7 +295,7 @@ export const MiniProgramPage: React.FC = () => {
             <Badge variant="success" className="text-xs">免 300 元认证费通道</Badge>
           </h2>
           <p className="text-sm text-muted-foreground">
-            快速免密开通小程序、公众号维度关联小程序、开放平台代码模板库/草稿箱、服务器域名代配置及免密登录网关
+            快速免密开通小程序、公众号维度关联小程序、代码模板库/草稿箱、代码提交与审核发布全链路、域名代配置及免密登录网关
           </p>
         </div>
 
@@ -747,6 +750,11 @@ export const MiniProgramPage: React.FC = () => {
               </Card>
             </TabsContent>
           </Tabs>
+        </TabsContent>
+
+        {/* 标签页 4：代码发布管理 (提交代码 / 体验版 / 提审 / 发布 / 类目 / 体验者) */}
+        <TabsContent value="code" className="mt-6">
+          <CodeManagePanel />
         </TabsContent>
 
         {/* 标签页 4：代配置服务器域名 */}

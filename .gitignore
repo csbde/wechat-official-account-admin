@@ -16,3 +16,4 @@ data/
 files/upload-image/
 files/wx-download-media/
 *.pid
+wechat-official-account-admin-fe/tsconfig.tsbuildinfo

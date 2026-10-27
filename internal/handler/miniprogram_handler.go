@@ -467,3 +467,418 @@ func (h *MiniProgramHandler) DeleteTemplate(c *gin.Context) {
 
 	Ok(c, gin.H{"message": "模板已删除"})
 }
+
+// ==========================================================================
+// 小程序代码管理与发布 (提交代码 / 体验版 / 提审 / 发布 / 灰度 / 类目 / 体验者)
+// 以下接口全部通过 TenantAppID 中间件严格校验目标小程序归属租户，防止跨租户越权
+// ==========================================================================
+
+// requireMiniApp 提取并校验目标小程序 AppID
+func requireMiniApp(c *gin.Context) string {
+	appid := GetAppID(c)
+	if appid == "" {
+		Fail(c, http.StatusBadRequest, "请先指定要操作的小程序 AppID (X-App-ID 或 appid 参数)")
+		return ""
+	}
+	return appid
+}
+
+// ListMiniApps 获取当前租户下可被代管代码的账号列表 (供前端选择目标小程序)
+func (h *MiniProgramHandler) ListMiniApps(c *gin.Context) {
+	tenantID := GetTenantID(c)
+	var list []model.WxAccount
+	database.DB.Where("tenant_id = ? AND enabled = ?", tenantID, true).
+		Order("account_type asc, id asc").Find(&list)
+
+	out := make([]gin.H, 0, len(list))
+	for _, a := range list {
+		out = append(out, gin.H{
+			"id":           a.ID,
+			"name":         a.Name,
+			"appid":        a.AppID,
+			"original_id":  a.OriginalID,
+			"account_type": a.AccountType,
+			"avatar_url":   a.AvatarURL,
+		})
+	}
+	Ok(c, out)
+}
+
+// CommitCode 使用代码模板为小程序提交代码 (wxa/commit)
+func (h *MiniProgramHandler) CommitCode(c *gin.Context) {
+	appid := requireMiniApp(c)
+	if appid == "" {
+		return
+	}
+
+	var req service.CommitCodeParam
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Fail(c, http.StatusBadRequest, "参数格式错误: "+err.Error())
+		return
+	}
+	if req.TemplateID <= 0 {
+		Fail(c, http.StatusBadRequest, "代码模板 ID 不能为空，请先在「代码模板库」中获取")
+		return
+	}
+	if strings.TrimSpace(req.UserVersion) == "" {
+		Fail(c, http.StatusBadRequest, "代码版本号不能为空")
+		return
+	}
+	if strings.TrimSpace(req.UserDesc) == "" {
+		req.UserDesc = req.UserVersion
+	}
+
+	if err := service.DefaultWxMiniService.CommitCode(c.Request.Context(), appid, req); err != nil {
+		Fail(c, http.StatusInternalServerError, "提交代码失败: "+err.Error())
+		return
+	}
+	Ok(c, gin.H{"message": "代码已成功提交至该小程序，可直接扫码体验或提交审核"})
+}
+
+// GetCodePages 获取小程序代码的页面列表 (wxa/get_page)
+func (h *MiniProgramHandler) GetCodePages(c *gin.Context) {
+	appid := requireMiniApp(c)
+	if appid == "" {
+		return
+	}
+	pages, err := service.DefaultWxMiniService.GetCodePageList(c.Request.Context(), appid)
+	if err != nil {
+		Fail(c, http.StatusInternalServerError, "获取页面列表失败: "+err.Error())
+		return
+	}
+	Ok(c, gin.H{"pages": pages})
+}
+
+// GetTrialQrcode 获取体验版二维码 (wxa/get_qrcode)
+func (h *MiniProgramHandler) GetTrialQrcode(c *gin.Context) {
+	appid := requireMiniApp(c)
+	if appid == "" {
+		return
+	}
+	img, err := service.DefaultWxMiniService.GetTrialQrcode(c.Request.Context(), appid, c.Query("path"))
+	if err != nil {
+		Fail(c, http.StatusInternalServerError, "获取体验版二维码失败: "+err.Error())
+		return
+	}
+	Ok(c, gin.H{"image": img})
+}
+
+// SubmitAudit 提交代码审核 (wxa/submit_audit)
+func (h *MiniProgramHandler) SubmitAudit(c *gin.Context) {
+	appid := requireMiniApp(c)
+	if appid == "" {
+		return
+	}
+	var req service.SubmitAuditParam
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Fail(c, http.StatusBadRequest, "参数格式错误: "+err.Error())
+		return
+	}
+	auditID, err := service.DefaultWxMiniService.SubmitAudit(c.Request.Context(), appid, req)
+	if err != nil {
+		Fail(c, http.StatusInternalServerError, "提交审核失败: "+err.Error())
+		return
+	}
+	Ok(c, gin.H{"auditid": auditID, "message": fmt.Sprintf("提审成功，微信审核单号 %d，请等待审核结果", auditID)})
+}
+
+// GetAuditStatus 查询指定审核单状态 (wxa/get_auditstatus)
+func (h *MiniProgramHandler) GetAuditStatus(c *gin.Context) {
+	appid := requireMiniApp(c)
+	if appid == "" {
+		return
+	}
+	auditID, err := strconv.ParseInt(c.Query("auditid"), 10, 64)
+	if err != nil || auditID <= 0 {
+		Fail(c, http.StatusBadRequest, "审核单号 auditid 无效")
+		return
+	}
+	res, err := service.DefaultWxMiniService.GetAuditStatus(c.Request.Context(), appid, auditID)
+	if err != nil {
+		Fail(c, http.StatusInternalServerError, "查询审核状态失败: "+err.Error())
+		return
+	}
+	Ok(c, res)
+}
+
+// GetLatestAudit 查询最近一次提审记录 (wxa/get_latest_auditstatus)
+func (h *MiniProgramHandler) GetLatestAudit(c *gin.Context) {
+	appid := requireMiniApp(c)
+	if appid == "" {
+		return
+	}
+	res, err := service.DefaultWxMiniService.GetLatestAuditStatus(c.Request.Context(), appid)
+	if err != nil {
+		Fail(c, http.StatusInternalServerError, "查询最近审核记录失败: "+err.Error())
+		return
+	}
+	Ok(c, res)
+}
+
+// UndoAudit 撤回审核 (wxa/undocodeaudit)
+func (h *MiniProgramHandler) UndoAudit(c *gin.Context) {
+	appid := requireMiniApp(c)
+	if appid == "" {
+		return
+	}
+	if err := service.DefaultWxMiniService.UndoCodeAudit(c.Request.Context(), appid); err != nil {
+		Fail(c, http.StatusInternalServerError, "撤回审核失败: "+err.Error())
+		return
+	}
+	Ok(c, gin.H{"message": "已提交撤回审核请求"})
+}
+
+// GetCodePrivacyInfo 查询代码隐私接口检测结果 (提审前置检查)
+func (h *MiniProgramHandler) GetCodePrivacyInfo(c *gin.Context) {
+	appid := requireMiniApp(c)
+	if appid == "" {
+		return
+	}
+	res, err := service.DefaultWxMiniService.GetCodePrivacyInfo(c.Request.Context(), appid)
+	if err != nil {
+		Fail(c, http.StatusInternalServerError, "隐私接口检测查询失败: "+err.Error())
+		return
+	}
+	Ok(c, res)
+}
+
+// ReleaseCode 全量发布已审核通过的版本 (wxa/release)
+func (h *MiniProgramHandler) ReleaseCode(c *gin.Context) {
+	appid := requireMiniApp(c)
+	if appid == "" {
+		return
+	}
+	if err := service.DefaultWxMiniService.ReleaseCode(c.Request.Context(), appid); err != nil {
+		Fail(c, http.StatusInternalServerError, "发布失败: "+err.Error())
+		return
+	}
+	Ok(c, gin.H{"message": "小程序已成功全量发布上线"})
+}
+
+// GetVisitStatus 查询服务可访问状态 (wxa/getvisitstatus)
+func (h *MiniProgramHandler) GetVisitStatus(c *gin.Context) {
+	appid := requireMiniApp(c)
+	if appid == "" {
+		return
+	}
+	res, err := service.DefaultWxMiniService.GetVisitStatus(c.Request.Context(), appid)
+	if err != nil {
+		Fail(c, http.StatusInternalServerError, "查询访问状态失败: "+err.Error())
+		return
+	}
+	Ok(c, res)
+}
+
+// SetVisitStatus 设置服务可访问状态 (wxa/change_visitstatus)
+func (h *MiniProgramHandler) SetVisitStatus(c *gin.Context) {
+	appid := requireMiniApp(c)
+	if appid == "" {
+		return
+	}
+	var req struct {
+		Action string `json:"action" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Fail(c, http.StatusBadRequest, "action 只能为 open 或 close")
+		return
+	}
+	if req.Action != "open" && req.Action != "close" {
+		Fail(c, http.StatusBadRequest, "action 只能为 open 或 close")
+		return
+	}
+	if err := service.DefaultWxMiniService.SetVisitStatus(c.Request.Context(), appid, req.Action); err != nil {
+		Fail(c, http.StatusInternalServerError, "设置访问状态失败: "+err.Error())
+		return
+	}
+	Ok(c, gin.H{"message": "服务可访问状态已更新"})
+}
+
+// GetHistoryVersions 获取可回退的历史线上版本 (wxa/revertcoderelease)
+func (h *MiniProgramHandler) GetHistoryVersions(c *gin.Context) {
+	appid := requireMiniApp(c)
+	if appid == "" {
+		return
+	}
+	list, err := service.DefaultWxMiniService.GetHistoryVersions(c.Request.Context(), appid)
+	if err != nil {
+		Fail(c, http.StatusInternalServerError, "获取历史版本失败: "+err.Error())
+		return
+	}
+	Ok(c, gin.H{"versions": list})
+}
+
+// RevertRelease 回退线上版本 (wxa/revertcoderelease)
+func (h *MiniProgramHandler) RevertRelease(c *gin.Context) {
+	appid := requireMiniApp(c)
+	if appid == "" {
+		return
+	}
+	var req struct {
+		AppVersion string `json:"app_version"`
+	}
+	_ = c.ShouldBindJSON(&req)
+	if err := service.DefaultWxMiniService.RevertCodeRelease(c.Request.Context(), appid, req.AppVersion); err != nil {
+		Fail(c, http.StatusInternalServerError, "版本回退失败: "+err.Error())
+		return
+	}
+	Ok(c, gin.H{"message": "线上版本回退指令已提交至微信"})
+}
+
+// GetSupportVersion 获取最低基础库版本与用户占比 (getweappsupportversion)
+func (h *MiniProgramHandler) GetSupportVersion(c *gin.Context) {
+	appid := requireMiniApp(c)
+	if appid == "" {
+		return
+	}
+	res, err := service.DefaultWxMiniService.GetSupportVersion(c.Request.Context(), appid)
+	if err != nil {
+		Fail(c, http.StatusInternalServerError, "获取基础库版本失败: "+err.Error())
+		return
+	}
+	Ok(c, res)
+}
+
+// SetSupportVersion 设置最低基础库版本 (setweappsupportversion)
+func (h *MiniProgramHandler) SetSupportVersion(c *gin.Context) {
+	appid := requireMiniApp(c)
+	if appid == "" {
+		return
+	}
+	var req struct {
+		Version string `json:"version" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Fail(c, http.StatusBadRequest, "基础库版本号不能为空")
+		return
+	}
+	if err := service.DefaultWxMiniService.SetSupportVersion(c.Request.Context(), appid, req.Version); err != nil {
+		Fail(c, http.StatusInternalServerError, "设置基础库版本失败: "+err.Error())
+		return
+	}
+	Ok(c, gin.H{"message": "最低基础库版本已更新"})
+}
+
+// GetCategories 获取小程序已设置的服务类目 (wxopen/getcategory)
+func (h *MiniProgramHandler) GetCategories(c *gin.Context) {
+	appid := requireMiniApp(c)
+	if appid == "" {
+		return
+	}
+	res, err := service.DefaultWxMiniService.GetCategories(c.Request.Context(), appid)
+	if err != nil {
+		Fail(c, http.StatusInternalServerError, "获取服务类目失败: "+err.Error())
+		return
+	}
+	Ok(c, res)
+}
+
+// AddCategory 新增小程序服务类目 (wxopen/addcategory)
+func (h *MiniProgramHandler) AddCategory(c *gin.Context) {
+	appid := requireMiniApp(c)
+	if appid == "" {
+		return
+	}
+	var req struct {
+		Categories []service.CategoryItem `json:"categories"`
+		First      int                    `json:"first"`
+		Second     int                    `json:"second"`
+		Certicates []service.CategoryCert `json:"certicates"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Fail(c, http.StatusBadRequest, "参数格式错误: "+err.Error())
+		return
+	}
+	items := req.Categories
+	if len(items) == 0 {
+		if req.First <= 0 || req.Second <= 0 {
+			Fail(c, http.StatusBadRequest, "一级类目 ID 与二级类目 ID 不能为空")
+			return
+		}
+		items = []service.CategoryItem{{First: req.First, Second: req.Second, Certicates: req.Certicates}}
+	}
+	if err := service.DefaultWxMiniService.AddCategory(c.Request.Context(), appid, items); err != nil {
+		Fail(c, http.StatusInternalServerError, "新增类目失败: "+err.Error())
+		return
+	}
+	Ok(c, gin.H{"message": "类目新增申请已提交，需等待微信类目审核通过"})
+}
+
+// DeleteCategory 删除小程序服务类目 (wxopen/deletecategory)
+func (h *MiniProgramHandler) DeleteCategory(c *gin.Context) {
+	appid := requireMiniApp(c)
+	if appid == "" {
+		return
+	}
+	var req struct {
+		First  int `json:"first" binding:"required"`
+		Second int `json:"second" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Fail(c, http.StatusBadRequest, "一级与二级类目 ID 均不能为空")
+		return
+	}
+	if err := service.DefaultWxMiniService.DeleteCategory(c.Request.Context(), appid, req.First, req.Second); err != nil {
+		Fail(c, http.StatusInternalServerError, "删除类目失败: "+err.Error())
+		return
+	}
+	Ok(c, gin.H{"message": "服务类目已删除"})
+}
+
+// GetTesters 获取体验者列表 (wxa/memberauth)
+func (h *MiniProgramHandler) GetTesters(c *gin.Context) {
+	appid := requireMiniApp(c)
+	if appid == "" {
+		return
+	}
+	list, err := service.DefaultWxMiniService.GetTesterList(c.Request.Context(), appid)
+	if err != nil {
+		Fail(c, http.StatusInternalServerError, "获取体验者列表失败: "+err.Error())
+		return
+	}
+	Ok(c, gin.H{"members": list})
+}
+
+// BindTester 绑定体验者 (wxa/bind_tester)
+func (h *MiniProgramHandler) BindTester(c *gin.Context) {
+	appid := requireMiniApp(c)
+	if appid == "" {
+		return
+	}
+	var req struct {
+		WechatID string `json:"wechatid" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Fail(c, http.StatusBadRequest, "体验者微信号不能为空")
+		return
+	}
+	if err := service.DefaultWxMiniService.BindTester(c.Request.Context(), appid, strings.TrimSpace(req.WechatID)); err != nil {
+		Fail(c, http.StatusInternalServerError, "绑定体验者失败: "+err.Error())
+		return
+	}
+	Ok(c, gin.H{"message": "体验者绑定成功"})
+}
+
+// UnbindTester 解绑体验者 (wxa/unbind_tester)
+func (h *MiniProgramHandler) UnbindTester(c *gin.Context) {
+	appid := requireMiniApp(c)
+	if appid == "" {
+		return
+	}
+	var req struct {
+		WechatID string `json:"wechatid"`
+		UserStr  string `json:"userstr"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Fail(c, http.StatusBadRequest, "参数格式错误")
+		return
+	}
+	if strings.TrimSpace(req.WechatID) == "" && strings.TrimSpace(req.UserStr) == "" {
+		Fail(c, http.StatusBadRequest, "微信号与 userstr 至少填写一个")
+		return
+	}
+	if err := service.DefaultWxMiniService.UnbindTester(c.Request.Context(), appid, strings.TrimSpace(req.WechatID), strings.TrimSpace(req.UserStr)); err != nil {
+		Fail(c, http.StatusInternalServerError, "解绑体验者失败: "+err.Error())
+		return
+	}
+	Ok(c, gin.H{"message": "体验者已解绑"})
+}

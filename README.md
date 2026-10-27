@@ -113,6 +113,16 @@
     - 完整呈现微信官方认证状态、主体全称、原始ID、头像与已授权第三方代管的权限集清单 (`func_info`)。
 
 
+
+14. **小程序代码管理与发布 (Code Management — 小程序 / 开放平台维度)**:
+    - 覆盖微信官方「代码管理」全链路接口，全部使用目标小程序的 `authorizer_access_token`，并由 `TenantAppID` 中间件强制校验小程序归属租户，杜绝跨租户越权代管他人小程序代码。
+    - **提交代码 `wxa/commit`**：选择代码模板库中的 template_id，填写版本号与描述即可为任意已授权小程序上传开发版本；`ext_json` 留空时自动按目标小程序生成 (支持手工覆盖 `requiredPrivateInfos` 等高级配置)。
+    - **体验版 `wxa/get_qrcode`**：在线获取体验版二维码 (可指定落地页 path 与参数)，配合体验者绑定 (`wxa/bind_tester`、`wxa/unbind_tester`、`wxa/memberauth`) 直接扫码体验。
+    - **提交审核 `wxa/submit_audit`**：可视化填写至多 5 个审核项 (页面地址 + 类目 ID/名称 + 标签)，页面地址可从 `wxa/get_page` 返回的代码包页面列表一键填入；支持 `privacy_api_not_use` 声明规避 61040。
+    - **审核跟踪与撤回**：`wxa/get_latest_auditstatus` 总览最近一次提审、`wxa/get_auditstatus` 按单号精查、`wxa/undocodeaudit` 一键撤回；并提供 `wxa/security/get_code_privacy_info` 隐私接口检测 (避免 61039 检测未完成即提审)。
+    - **发布与回退**：`wxa/release` 全量发布、`wxa/revertcoderelease` 查看历史线上版本并回退到指定版本、`wxa/getvisitstatus` / `wxa/change_visitstatus` 控制服务可见性 (暂停 / 恢复)。
+    - **基础库与类目**：`getweappsupportversion` / `setweappsupportversion` 管理最低基础库版本；`wxopen/getcategory`、`wxopen/addcategory`、`wxopen/deletecategory` 管理服务类目及类目审核状态与配额。
+
 ---
 
 

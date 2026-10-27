@@ -185,6 +185,7 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 		protected.GET("/miniprogram/templates", miniHandler.GetTemplates)
 		protected.POST("/miniprogram/templates/add-from-draft", miniHandler.AddTemplateFromDraft)
 		protected.DELETE("/miniprogram/templates/:id", miniHandler.DeleteTemplate)
+		protected.GET("/miniprogram/apps", miniHandler.ListMiniApps)
 
 		// 微信业务相关接口 (必须携带 AppID，且经由 TenantAppID 严格防越权校验)
 		tenant := protected.Group("")
@@ -241,6 +242,31 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 			tenant.GET("/miniprogram/linked", miniHandler.GetLinkedMiniPrograms)
 			tenant.POST("/miniprogram/link", miniHandler.LinkMiniProgram)
 			tenant.POST("/miniprogram/unlink", miniHandler.UnlinkMiniProgram)
+
+			// 小程序代码管理与发布 (提交代码 / 体验版 / 提审 / 发布 / 灰度 / 类目 / 体验者)
+			tenant.POST("/miniprogram/code/commit", miniHandler.CommitCode)
+			tenant.GET("/miniprogram/code/pages", miniHandler.GetCodePages)
+			tenant.GET("/miniprogram/code/trial-qrcode", miniHandler.GetTrialQrcode)
+			tenant.POST("/miniprogram/code/submit-audit", miniHandler.SubmitAudit)
+			tenant.GET("/miniprogram/code/audit-status", miniHandler.GetAuditStatus)
+			tenant.GET("/miniprogram/code/latest-audit", miniHandler.GetLatestAudit)
+			tenant.GET("/miniprogram/code/privacy-info", miniHandler.GetCodePrivacyInfo)
+			tenant.POST("/miniprogram/code/undo-audit", miniHandler.UndoAudit)
+			tenant.POST("/miniprogram/code/release", miniHandler.ReleaseCode)
+			tenant.GET("/miniprogram/code/visit-status", miniHandler.GetVisitStatus)
+			tenant.POST("/miniprogram/code/visit-status", miniHandler.SetVisitStatus)
+			tenant.GET("/miniprogram/code/versions", miniHandler.GetHistoryVersions)
+			tenant.POST("/miniprogram/code/revert", miniHandler.RevertRelease)
+			tenant.GET("/miniprogram/code/support-version", miniHandler.GetSupportVersion)
+			tenant.POST("/miniprogram/code/support-version", miniHandler.SetSupportVersion)
+
+			// 小程序服务类目与体验者成员管理
+			tenant.GET("/miniprogram/categories", miniHandler.GetCategories)
+			tenant.POST("/miniprogram/categories", miniHandler.AddCategory)
+			tenant.POST("/miniprogram/categories/delete", miniHandler.DeleteCategory)
+			tenant.GET("/miniprogram/testers", miniHandler.GetTesters)
+			tenant.POST("/miniprogram/testers/bind", miniHandler.BindTester)
+			tenant.POST("/miniprogram/testers/unbind", miniHandler.UnbindTester)
 		}
 	}
 
