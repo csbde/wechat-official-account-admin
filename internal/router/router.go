@@ -166,6 +166,9 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 		protected.POST("/system/users", systemHandler.CreateUser)
 		protected.PUT("/system/users/:id", systemHandler.UpdateUser)
 		protected.DELETE("/system/users/:id", systemHandler.DeleteUser)
+		protected.GET("/system/oidc", systemHandler.GetOIDCSetting)
+		protected.POST("/system/oidc", systemHandler.SaveOIDCSetting)
+		protected.POST("/system/oidc/test", systemHandler.TestOIDCDiscovery)
 
 		// 微信业务相关接口 (必须携带 AppID，且经由 TenantAppID 严格防越权校验)
 		tenant := protected.Group("")

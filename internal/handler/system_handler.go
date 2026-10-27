@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anchel/wechat-official-account-admin/config"
+	"github.com/anchel/wechat-official-account-admin/internal/auth"
 	"github.com/anchel/wechat-official-account-admin/internal/cache"
 	"github.com/anchel/wechat-official-account-admin/internal/database"
 	"github.com/anchel/wechat-official-account-admin/internal/model"
@@ -396,5 +397,139 @@ func (h *SystemHandler) HealthCheck(c *gin.Context) {
 			asynqHealth,
 			wxHealth,
 		},
+	})
+}
+
+// GetOIDCSetting 获取当前 OIDC 配置 (优先数据库，回退配置文件)
+func (h *SystemHandler) GetOIDCSetting(c *gin.Context) {
+	tenantID := GetTenantID(c)
+	var setting model.SystemOIDCSetting
+
+	// 生成建议的回调地址 (自动自适应 HTTPS 和反向代理域名)
+	suggestedRedirect := BuildPublicURL(c, "/api/auth/oidc/callback")
+
+	err := database.DB.Where("tenant_id = ?", tenantID).First(&setting).Error
+	if err != nil {
+		cfg := config.GlobalConfig.OIDC
+		scopesStr := strings.Join(cfg.Scopes, " ")
+		if scopesStr == "" {
+			scopesStr = "openid profile email"
+		}
+		Ok(c, gin.H{
+			"enabled":            cfg.Enabled,
+			"issuer":             cfg.Issuer,
+			"client_id":          cfg.ClientID,
+			"client_secret":      cfg.ClientSecret,
+			"redirect_uri":       cfg.RedirectURI,
+			"suggested_redirect": suggestedRedirect,
+			"scopes":             scopesStr,
+		})
+		return
+	}
+
+	displaySecret := setting.ClientSecret
+	if len(displaySecret) > 8 {
+		displaySecret = displaySecret[:4] + "******" + displaySecret[len(displaySecret)-4:]
+	}
+
+	red := setting.RedirectURI
+	if red == "" {
+		red = suggestedRedirect
+	}
+
+	Ok(c, gin.H{
+		"id":                 setting.ID,
+		"enabled":            setting.Enabled,
+		"issuer":             setting.Issuer,
+		"client_id":          setting.ClientID,
+		"client_secret":      setting.ClientSecret,
+		"display_secret":     displaySecret,
+		"redirect_uri":       red,
+		"suggested_redirect": suggestedRedirect,
+		"scopes":             setting.Scopes,
+	})
+}
+
+// SaveOIDCSetting 保存或更新 OIDC 可视化配置
+func (h *SystemHandler) SaveOIDCSetting(c *gin.Context) {
+	tenantID := GetTenantID(c)
+	var req struct {
+		Enabled      bool   `json:"enabled"`
+		Issuer       string `json:"issuer"`
+		ClientID     string `json:"client_id"`
+		ClientSecret string `json:"client_secret"`
+		RedirectURI  string `json:"redirect_uri"`
+		Scopes       string `json:"scopes"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	var setting model.SystemOIDCSetting
+	err := database.DB.Where("tenant_id = ?", tenantID).First(&setting).Error
+	if err != nil {
+		setting = model.SystemOIDCSetting{
+			TenantID:     tenantID,
+			Enabled:      req.Enabled,
+			Issuer:       strings.TrimSpace(req.Issuer),
+			ClientID:     strings.TrimSpace(req.ClientID),
+			ClientSecret: strings.TrimSpace(req.ClientSecret),
+			RedirectURI:  strings.TrimSpace(req.RedirectURI),
+			Scopes:       strings.TrimSpace(req.Scopes),
+		}
+		database.DB.Create(&setting)
+	} else {
+		setting.Enabled = req.Enabled
+		setting.Issuer = strings.TrimSpace(req.Issuer)
+		setting.ClientID = strings.TrimSpace(req.ClientID)
+		if req.ClientSecret != "" && !strings.Contains(req.ClientSecret, "******") {
+			setting.ClientSecret = strings.TrimSpace(req.ClientSecret)
+		}
+		setting.RedirectURI = strings.TrimSpace(req.RedirectURI)
+		if req.Scopes != "" {
+			setting.Scopes = strings.TrimSpace(req.Scopes)
+		}
+		database.DB.Save(&setting)
+	}
+
+	// 热更新内存全局配置
+	config.GlobalConfig.OIDC.Enabled = setting.Enabled
+	config.GlobalConfig.OIDC.Issuer = setting.Issuer
+	config.GlobalConfig.OIDC.ClientID = setting.ClientID
+	if setting.ClientSecret != "" {
+		config.GlobalConfig.OIDC.ClientSecret = setting.ClientSecret
+	}
+	config.GlobalConfig.OIDC.RedirectURI = setting.RedirectURI
+	if setting.Scopes != "" {
+		config.GlobalConfig.OIDC.Scopes = strings.Fields(setting.Scopes)
+	}
+
+	Ok(c, setting)
+}
+
+// TestOIDCDiscovery 在线测试 OIDC 发现端点连通性
+func (h *SystemHandler) TestOIDCDiscovery(c *gin.Context) {
+	var req struct {
+		Issuer string `json:"issuer" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Fail(c, http.StatusBadRequest, "Issuer 地址不能为空")
+		return
+	}
+
+	issuer := strings.TrimRight(strings.TrimSpace(req.Issuer), "/")
+	disc, err := auth.DefaultOIDCService.GetDiscovery(c.Request.Context(), issuer)
+	if err != nil {
+		Fail(c, http.StatusInternalServerError, fmt.Sprintf("无法连接到 OIDC 发现端点 (%s/.well-known/openid-configuration): %v", issuer, err))
+		return
+	}
+
+	Ok(c, gin.H{
+		"message":                "OIDC 服务商发现端点连通成功！",
+		"issuer":                 disc.Issuer,
+		"authorization_endpoint": disc.AuthorizationEndpoint,
+		"token_endpoint":         disc.TokenEndpoint,
+		"userinfo_endpoint":      disc.UserinfoEndpoint,
 	})
 }

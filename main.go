@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"strings"
 	"time"
 
 	"github.com/anchel/wechat-official-account-admin/config"
@@ -92,6 +93,7 @@ func startServer() {
 
 	// 初始化默认主租户与管理员
 	initDefaultTenantAndAdmin(db)
+	loadDBOIDCSettings(db)
 
 	// 5. 初始化 Redis 缓存 (可选)
 	if cfg.Redis.Addr != "" {
@@ -184,5 +186,20 @@ func initDefaultTenantAndAdmin(db *gorm.DB) {
 		}
 		db.Create(&admin)
 		logger.Info("Default superadmin user created: admin / admin123 (Tenant: 1)")
+	}
+}
+
+func loadDBOIDCSettings(db *gorm.DB) {
+	var setting model.SystemOIDCSetting
+	if err := db.Where("enabled = ?", true).First(&setting).Error; err == nil {
+		config.GlobalConfig.OIDC.Enabled = setting.Enabled
+		config.GlobalConfig.OIDC.Issuer = setting.Issuer
+		config.GlobalConfig.OIDC.ClientID = setting.ClientID
+		config.GlobalConfig.OIDC.ClientSecret = setting.ClientSecret
+		config.GlobalConfig.OIDC.RedirectURI = setting.RedirectURI
+		if setting.Scopes != "" {
+			config.GlobalConfig.OIDC.Scopes = strings.Fields(setting.Scopes)
+		}
+		logger.Info("OIDC settings loaded from database", zap.String("issuer", setting.Issuer))
 	}
 }

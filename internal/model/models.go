@@ -219,6 +219,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&WxTag{},
 		&WxQrcode{},
 		&RequestLog{},
+		&SystemOIDCSetting{},
 	)
 }
 
@@ -237,6 +238,21 @@ type WxAISetting struct {
 	MaxTokens    int            `gorm:"default:800" json:"max_tokens"`
 	MatchMode    string         `gorm:"size:32;default:'fallback'" json:"match_mode"` // fallback: 未命中关键词时AI回复, all: 全部消息由AI回复
 	TimeoutSec   int            `gorm:"default:4" json:"timeout_sec"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
+}
+
+// SystemOIDCSetting OIDC 单点登录系统可视化持久化配置
+type SystemOIDCSetting struct {
+	ID           uint           `gorm:"primaryKey" json:"id"`
+	TenantID     uint           `gorm:"index;not null;default:1" json:"tenant_id"`
+	Enabled      bool           `gorm:"default:false" json:"enabled"`
+	Issuer       string         `gorm:"size:255" json:"issuer"`
+	ClientID     string         `gorm:"size:128" json:"client_id"`
+	ClientSecret string         `gorm:"size:255" json:"client_secret"`
+	RedirectURI  string         `gorm:"size:255" json:"redirect_uri"`
+	Scopes       string         `gorm:"size:255;default:'openid profile email'" json:"scopes"`
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
 	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
