@@ -46,6 +46,7 @@ interface TenantRow {
   user_count: number
   is_current: boolean
   is_home: boolean
+  ghost?: boolean
   created_at: string
 }
 
@@ -164,11 +165,17 @@ export const TenantPanel: React.FC = () => {
     saveMutation.mutate({ ...form, code: form.code.trim(), name: form.name.trim() })
   }
 
-  // 切换到该租户视角（仅超级管理员）
+  // 切换到该租户视角（仅超级管理员）。activeTenantId=null 表示平台全局视角。
   const switchView = (t: TenantRow) => {
-    setActiveTenantId(t.id === (user?.tenant_id ?? 1) ? null : t.id)
+    setActiveTenantId(t.id)
     queryClient.invalidateQueries()
-    toast.success(t.id === (user?.tenant_id ?? 1) ? '已回到本租户视角' : `已切换到租户「${t.name}」视角`)
+    toast.success(`已切换到租户「${t.name}」视角，仅显示并操作该租户的数据`)
+  }
+
+  const backToGlobal = () => {
+    setActiveTenantId(null)
+    queryClient.invalidateQueries()
+    toast.success('已回到平台全局视角 (跨租户可见)')
   }
 
   useEffect(() => {
@@ -272,6 +279,11 @@ export const TenantPanel: React.FC = () => {
                           当前视角
                         </Badge>
                       )}
+                      {t.ghost && (
+                        <Badge variant="destructive" className="text-[10px]">
+                          数据残留租户
+                        </Badge>
+                      )}
                     </div>
                     {t.description && (
                       <div className="text-[11px] text-muted-foreground mt-0.5 max-w-[280px] truncate">
@@ -295,7 +307,11 @@ export const TenantPanel: React.FC = () => {
                           variant="ghost"
                           size="icon"
                           className="h-7 w-7"
-                          title={t.status === 1 ? '切换到该租户视角 (代运营)' : '该租户已停用，无法切换'}
+                          title={
+                            t.status === 1
+                              ? '切换到该租户视角 (只操作该租户数据)'
+                              : '该租户已停用，无法切换'
+                          }
                           disabled={t.status !== 1}
                           onClick={() => switchView(t)}
                         >
@@ -307,8 +323,8 @@ export const TenantPanel: React.FC = () => {
                           variant="ghost"
                           size="icon"
                           className="h-7 w-7 text-primary"
-                          title="返回本租户视角"
-                          onClick={() => switchView(t)}
+                          title="返回平台全局视角 (跨租户可见)"
+                          onClick={backToGlobal}
                         >
                           <ShieldCheck className="h-3.5 w-3.5" />
                         </Button>
@@ -344,10 +360,22 @@ export const TenantPanel: React.FC = () => {
           </TableBody>
         </Table>
 
-        {activeTenantId && (
-          <div className="mx-6 mb-4 mt-1 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/25 text-[11px] text-amber-700 dark:text-amber-300">
-            你正处于「代管租户」视角，所有新增的公众号、菜单、素材等数据都会归属该租户；操作完成后请及时切回本租户。
+        {activeTenantId ? (
+          <div className="mx-6 mb-4 mt-1 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/25 text-[11px] text-amber-700 dark:text-amber-300 flex flex-wrap items-center gap-2">
+            <span>
+              已锁定租户视角：只显示并可操作该租户的数据，新增的公众号、菜单、素材等都会归属它。
+            </span>
+            <button onClick={backToGlobal} className="underline font-semibold">
+              返回平台全局视角
+            </button>
           </div>
+        ) : (
+          isSuperAdmin && (
+            <div className="mx-6 mb-4 mt-1 p-2.5 rounded-lg bg-sky-500/10 border border-sky-500/25 text-[11px] text-sky-700 dark:text-sky-300">
+              当前是「平台全局视角」：可跨租户查看全部公众号与数据 (新建内容仍落入你自己的租户)。
+              需要为某个租户录入数据时，点击该行的"眼睛"图标即可锁定该租户视角。
+            </div>
+          )
         )}
       </CardContent>
 

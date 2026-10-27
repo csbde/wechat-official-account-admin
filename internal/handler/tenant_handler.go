@@ -34,6 +34,7 @@ type TenantView struct {
 	UserCount    int64     `json:"user_count"`
 	IsCurrent    bool      `json:"is_current"` // 是否为当前操作视角租户
 	IsHome       bool      `json:"is_home"`    // 是否为当前登录用户真实所属租户
+	Ghost        bool      `json:"ghost"`      // 是否为"数据残留但租户记录缺失"的幽灵租户
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }
@@ -79,7 +80,7 @@ func (h *TenantHandler) List(c *gin.Context) {
 	accMap := loadTenantCountMap(&model.WxAccount{})
 	userMap := loadTenantCountMap(&model.User{})
 
-	views := make([]TenantView, 0, len(tenants))
+	views := make([]TenantView, 0, len(tenants)+2)
 	for _, t := range tenants {
 		views = append(views, TenantView{
 			ID:           t.ID,
@@ -95,7 +96,57 @@ func (h *TenantHandler) List(c *gin.Context) {
 			UpdatedAt:    t.UpdatedAt,
 		})
 	}
+	// 超级管理员额外暴露"幽灵租户": 被账号/成员引用但租户记录缺失的 ID，
+	// 这些历史数据否则谁都看不到、也无处纠正，是"我是超管却没超管权限"的常见根因。
+	if IsSuperAdmin(c) {
+		known := make(map[uint]bool, len(tenants))
+		for _, t := range tenants {
+			known[t.ID] = true
+		}
+		for _, id := range referencedTenantIDs() {
+			if known[id] || id == 0 {
+				continue
+			}
+			views = append(views, TenantView{
+				ID:           id,
+				Name:         fmt.Sprintf("未登记租户 #%d (数据残留)", id),
+				Code:         fmt.Sprintf("ghost-%d", id),
+				Description:  "该租户记录不存在或已被彻底删除，但仍有公众号/成员数据引用它。请切换到该视角把账号迁移到正式租户，或清理无用数据。",
+				Status:       1,
+				AccountCount: accMap[id],
+				UserCount:    userMap[id],
+				IsCurrent:    id == activeTenantID,
+				Ghost:        true,
+			})
+		}
+	}
+
 	Ok(c, views)
+}
+
+// referencedTenantIDs 返回所有被业务数据引用但 tenants 表中不存在的租户 ID
+func referencedTenantIDs() []uint {
+	type idRow struct {
+		TenantID uint
+	}
+	seen := map[uint]bool{}
+	out := make([]uint, 0, 4)
+	for _, tableName := range []string{"wx_accounts", "users"} {
+		var rows []idRow
+		database.DB.Unscoped().Table(tableName).Select("DISTINCT tenant_id").Scan(&rows)
+		for _, r := range rows {
+			if r.TenantID == 0 || seen[r.TenantID] {
+				continue
+			}
+			var exist int64
+			database.DB.Unscoped().Model(&model.Tenant{}).Where("id = ?", r.TenantID).Count(&exist)
+			if exist == 0 {
+				seen[r.TenantID] = true
+				out = append(out, r.TenantID)
+			}
+		}
+	}
+	return out
 }
 
 // Options 极简租户下拉选项 (超级管理员分配账号/用户归属时使用，不暴露描述等明细)

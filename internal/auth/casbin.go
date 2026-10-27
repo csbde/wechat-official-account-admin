@@ -80,6 +80,25 @@ func initDefaultPolicies(e *casbin.Enforcer) {
 		{"operator", "/api/system/public-ip", "GET"},
 		{"operator", "/api/system/health", "GET"},
 		{"operator", "/api/system/oidc", "GET"},
+
+		// 只读访客：可查看本租户业务数据与只读监控，不能做任何写操作
+		{"viewer", "/api/accounts", "GET"},
+		{"viewer", "/api/accounts.*", "GET"},
+		{"viewer", "/api/menu.*", "GET"},
+		{"viewer", "/api/materials.*", "GET"},
+		{"viewer", "/api/autoreply.*", "GET"},
+		{"viewer", "/api/fans.*", "GET"},
+		{"viewer", "/api/qrcode.*", "GET"},
+		{"viewer", "/api/miniprogram.*", "GET"},
+		{"viewer", "/api/notify.*", "GET"},
+		{"viewer", "/api/open.*", "GET"},
+		{"viewer", "/api/logs.*", "GET"},
+		{"viewer", "/api/wxgate/.*", "GET"},
+		{"viewer", "/api/auth/.*", ".*"},
+		{"viewer", "/api/system/tenants", "GET"},
+		{"viewer", "/api/system/public-ip", "GET"},
+		{"viewer", "/api/system/health", "GET"},
+		{"viewer", "/api/system/oidc", "GET"},
 	}
 
 	for _, rule := range rules {

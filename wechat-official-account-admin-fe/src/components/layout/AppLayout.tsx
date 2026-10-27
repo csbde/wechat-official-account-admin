@@ -174,10 +174,14 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentTab, onTabChange, c
                     />
                     <div className="flex flex-col text-left hidden sm:block">
                       <span className="text-[10px] text-muted-foreground leading-none">
-                        {viewTenant ? '代管租户视角' : '我的租户'}
+                        {viewTenant ? '租户视角' : isSuperAdmin ? '平台全局视角' : '我的租户'}
                       </span>
                       <span className="text-xs font-semibold leading-tight mt-0.5 max-w-[120px] truncate">
-                        {viewTenant ? viewTenant.name : tenant?.name || '默认组织'}
+                        {viewTenant
+                          ? viewTenant.name
+                          : isSuperAdmin
+                            ? '全部租户'
+                            : tenant?.name || '默认组织'}
                       </span>
                     </div>
                     <ChevronDown className="h-3.5 w-3.5 opacity-60" />
@@ -188,14 +192,27 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentTab, onTabChange, c
                     切换租户视角 (数据完全隔离)
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={() => switchTenantView(null)}
+                    className={`cursor-pointer py-2 gap-2 ${!activeTenantId ? 'bg-primary/10 font-semibold text-primary' : ''}`}
+                  >
+                    <ShieldAlert className="h-4 w-4 shrink-0 opacity-70" />
+                    <div className="flex flex-col truncate pr-2">
+                      <span className="truncate text-sm">平台全局视角 (跨租户可见)</span>
+                      <span className="text-[10px] text-muted-foreground">
+                        仅超级管理员可用；新建数据仍落入你自己的租户
+                      </span>
+                    </div>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
                   {tenants!.filter((t) => t.is_home).map((t) => (
                     <DropdownMenuItem
                       key={`home-${t.id}`}
-                      onClick={() => switchTenantView(null)}
-                      className={`cursor-pointer py-2 ${!activeTenantId ? 'bg-primary/10 font-semibold text-primary' : ''}`}
+                      onClick={() => switchTenantView(t.id)}
+                      className={`cursor-pointer py-2 ${activeTenantId === t.id ? 'bg-primary/10 font-semibold text-primary' : ''}`}
                     >
                       <div className="flex flex-col truncate pr-2">
-                        <span className="truncate text-sm">{t.name} (本租户)</span>
+                        <span className="truncate text-sm">{t.name} (本租户 · 严格锁定)</span>
                         <span className="text-[10px] text-muted-foreground font-mono">
                           {t.code} · {t.account_count} 个账号 / {t.user_count} 个用户
                         </span>
@@ -273,6 +290,11 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentTab, onTabChange, c
                       <div className="flex flex-col truncate pr-2">
                         <span className="truncate text-sm">{acc.name}</span>
                         <span className="text-[10px] text-muted-foreground font-mono">{acc.appid}</span>
+                        {(acc as any).tenant_name && (acc as any).tenant_id !== user?.tenant_id && (
+                          <span className="text-[10px] text-amber-600 dark:text-amber-400 truncate">
+                            归属：{(acc as any).tenant_name}
+                          </span>
+                        )}
                       </div>
                       {acc.is_default && <Badge variant="outline" className="text-[10px] shrink-0">默认</Badge>}
                     </DropdownMenuItem>
@@ -288,6 +310,13 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentTab, onTabChange, c
               </DropdownMenuContent>
             </DropdownMenu>
 
+            {isSuperAdmin && !activeTenantId && (
+              <div className="hidden xl:flex items-center gap-1.5 text-xs text-sky-700 dark:text-sky-300 bg-sky-500/10 px-3 py-1.5 rounded-lg border border-sky-500/25">
+                <ShieldAlert className="h-4 w-4" />
+                <span>平台全局视角：可查看所有租户的公众号与数据</span>
+              </div>
+            )}
+
             {viewTenant && (
               <div className="hidden lg:flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300 bg-amber-500/10 px-3 py-1.5 rounded-lg border border-amber-500/25">
                 <ShieldAlert className="h-4 w-4" />
@@ -298,7 +327,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentTab, onTabChange, c
                   onClick={() => switchTenantView(null)}
                   className="underline font-semibold hover:text-amber-900"
                 >
-                  返回本租户
+                  返回平台全局视角
                 </button>
               </div>
             )}

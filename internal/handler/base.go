@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/anchel/wechat-official-account-admin/config"
+	"github.com/anchel/wechat-official-account-admin/internal/database"
+	"github.com/anchel/wechat-official-account-admin/internal/model"
 
 	"github.com/gin-gonic/gin"
 )
@@ -103,6 +105,13 @@ func GetHomeTenantID(c *gin.Context) uint {
 	return GetTenantID(c)
 }
 
+// SuperAdminHasFullCrossTenantAccess 判断当前请求是否为"未指定租户视角的超级管理员"。
+// 语义：超级管理员默认拥有跨租户的全量可见与可维护能力(平台运维者)；
+// 一旦显式携带 X-Tenant-ID 切换视角，则严格按该视角收口，留下清晰的审计边界。
+func SuperAdminHasFullCrossTenantAccess(c *gin.Context) bool {
+	return IsSuperAdmin(c) && !IsTenantViewSwitched(c)
+}
+
 // IsTenantViewSwitched 判断超级管理员是否处于"代管其他租户"视角
 func IsTenantViewSwitched(c *gin.Context) bool {
 	val, exists := c.Get("tenant_view")
@@ -117,6 +126,33 @@ func IsTenantViewSwitched(c *gin.Context) bool {
 func IsSuperAdmin(c *gin.Context) bool {
 	role, exists := c.Get("role")
 	return exists && role == "superadmin"
+}
+
+// AccountNotFoundMessage 账号定位失败的统一可读提示 (区分超级管理员与普通成员)
+func AccountNotFoundMessage(c *gin.Context) string {
+	if IsSuperAdmin(c) {
+		return "公众号不存在；若你已切换租户视角，请先切换到该公众号所属租户后再操作"
+	}
+	return "公众号不存在或不属于你的租户组织 (越权访问已被拦截)"
+}
+
+// FindAccountForManage 按 ID 定位可维护的公众号账号。
+// 非超管严格限定本租户；超管未切视角可跨租户定位 (便于纠正错建到其它租户的数据)，
+// 超管已切视角则同样受视角约束。定位失败返回统一可读提示。
+func FindAccountForManage(c *gin.Context, id string) (*model.WxAccount, bool) {
+	tenantID := GetTenantID(c)
+	var account model.WxAccount
+
+	db := database.DB.Where("id = ? AND tenant_id = ?", id, tenantID)
+	if err := db.First(&account).Error; err == nil {
+		return &account, true
+	}
+	if SuperAdminHasFullCrossTenantAccess(c) {
+		if err := database.DB.Where("id = ?", id).First(&account).Error; err == nil {
+			return &account, true
+		}
+	}
+	return nil, false
 }
 
 // GetRequestScheme 获取请求的真实协议 (支持上级反向代理 X-Forwarded-Proto)

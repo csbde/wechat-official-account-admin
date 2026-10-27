@@ -23,11 +23,27 @@ func (h *OpenComponentHandler) GetComponent(c *gin.Context) {
 	tenantID := GetTenantID(c)
 	var comp model.WxOpenComponent
 
-	// 与保存/授权流程保持一致：严格按当前租户视角读取，超级管理员需先切换租户视角，
-	// 否则会看到别的平台的凭证配置而写到本租户，造成排查困难。
+	// 与保存/授权流程保持一致：默认严格按当前租户视角读取，避免把别的租户凭证写到本租户。
 	query := database.DB.Model(&model.WxOpenComponent{}).Where("tenant_id = ?", tenantID)
 
 	if err := query.First(&comp).Error; err != nil {
+		// 超级管理员未显式切换视角时，回退定位配置实际所在的租户并明确标注，
+		// 便于其直接切换到正确视角，而不是"配置存在却看不见"。
+		if SuperAdminHasFullCrossTenantAccess(c) {
+			var fallback model.WxOpenComponent
+			if ferr := database.DB.Model(&model.WxOpenComponent{}).Order("id asc").First(&fallback).Error; ferr == nil {
+				var t model.Tenant
+				database.DB.First(&t, fallback.TenantID)
+				Ok(c, gin.H{
+					"__need_view_switch": true,
+					"tenant_id":          fallback.TenantID,
+					"tenant_name":        t.Name,
+					"tenant_code":        t.Code,
+					"hint":               "该第三方平台配置归属于租户「" + t.Name + "(" + t.Code + ")」，请在顶栏切换到该租户视角后再查看与管理；当前视角内没有配置。",
+				})
+				return
+			}
+		}
 		Ok(c, nil)
 		return
 	}

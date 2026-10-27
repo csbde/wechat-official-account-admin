@@ -34,8 +34,8 @@ func (h *SystemHandler) UserList(c *gin.Context) {
 	tenantID := GetTenantID(c)
 	var users []model.User
 
-	// 默认只列出「当前租户视角」内的成员；超级管理员可用 ?all=1 做跨租户总览
-	scopeAll := IsSuperAdmin(c) && c.Query("all") == "1"
+	// 超级管理员默认可见全平台成员并标注归属租户(切视角后严格按视角)；普通成员只能看到本租户。
+	scopeAll := SuperAdminHasFullCrossTenantAccess(c) && c.Query("all") != "0"
 	query := database.DB.Model(&model.User{})
 	if !scopeAll {
 		query = query.Where("tenant_id = ?", tenantID)
@@ -126,9 +126,18 @@ func (h *SystemHandler) CreateUser(c *gin.Context) {
 	}
 
 	hash, _ := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
-	role := req.Role
-	if role == "" || role == "superadmin" {
+	role := strings.TrimSpace(req.Role)
+	if role == "" {
 		role = "operator"
+	}
+	// superadmin 是平台级身份：只有已经具备该身份的超级管理员才能授予，防止租户管理员自提权
+	if role == "superadmin" && !IsSuperAdmin(c) {
+		Fail(c, http.StatusForbidden, "越权操作：仅超级管理员可以创建超级管理员账号")
+		return
+	}
+	if !validSystemRole(role) {
+		Fail(c, http.StatusBadRequest, "不支持的角色: "+role+" (可选 superadmin / admin / operator / viewer)")
+		return
 	}
 
 	user := model.User{
@@ -157,10 +166,16 @@ func (h *SystemHandler) UpdateUser(c *gin.Context) {
 	id := c.Param("id")
 
 	var user model.User
-	// 成员管理严格限制在当前租户视角内 (超级管理员需先切换视角)，防止跨租户改密/提权
 	if err := database.DB.Where("id = ? AND tenant_id = ?", id, tenantID).First(&user).Error; err != nil {
-		Fail(c, http.StatusNotFound, "用户不存在或不属于当前租户视角 (超级管理员请先切换租户视角)")
-		return
+		// 超级管理员未显式切换视角时允许跨租户定位成员(平台运维语义)；其余情况严格拒绝
+		if !SuperAdminHasFullCrossTenantAccess(c) {
+			Fail(c, http.StatusNotFound, "用户不存在或不属于当前租户视角 (超级管理员请先切换租户视角)")
+			return
+		}
+		if err := database.DB.Where("id = ?", id).First(&user).Error; err != nil {
+			Fail(c, http.StatusNotFound, "用户不存在")
+			return
+		}
 	}
 
 	var req struct {
@@ -202,8 +217,28 @@ func (h *SystemHandler) UpdateUser(c *gin.Context) {
 		}
 		user.Email = req.Email
 	}
-	if req.Role != "" && req.Role != "superadmin" {
-		user.Role = req.Role
+	if newRole := strings.TrimSpace(req.Role); newRole != "" && newRole != user.Role {
+		if !validSystemRole(newRole) {
+			Fail(c, http.StatusBadRequest, "不支持的角色: "+newRole+" (可选 superadmin / admin / operator / viewer)")
+			return
+		}
+		if newRole == "superadmin" && !IsSuperAdmin(c) {
+			Fail(c, http.StatusForbidden, "越权操作：仅超级管理员可以授予超级管理员身份")
+			return
+		}
+		// 防止把系统内最后一个超级管理员降权导致无人可管理平台
+		demotingSuperadmin := user.Role == "superadmin" && newRole != "superadmin"
+		if demotingSuperadmin {
+			if user.ID == homeTenantUserID(c) && !confirmArg(c, "confirm") {
+				Fail(c, http.StatusBadRequest, "不能对自己取消超级管理员身份：请携带 confirm=1 二次确认，并确保已有其他超级管理员接管")
+				return
+			}
+			if countSuperadmins() <= 1 {
+				Fail(c, http.StatusBadRequest, "系统必须保留至少一个超级管理员：请先将其他成员设为超级管理员，再降权本账号")
+				return
+			}
+		}
+		user.Role = newRole
 	}
 	if req.Status != nil {
 		user.Status = *req.Status
@@ -235,9 +270,24 @@ func (h *SystemHandler) DeleteUser(c *gin.Context) {
 		return
 	}
 
-	res := database.DB.Where("id = ? AND tenant_id = ?", id, tenantID).Delete(&model.User{})
+	var target model.User
+	if err := database.DB.Where("id = ? AND tenant_id = ?", id, tenantID).First(&target).Error; err != nil {
+		if !SuperAdminHasFullCrossTenantAccess(c) {
+			Fail(c, http.StatusNotFound, "用户不存在或不属于当前租户视角 (超级管理员请先切换租户视角)")
+			return
+		}
+		if err := database.DB.Where("id = ?", id).First(&target).Error; err != nil {
+			Fail(c, http.StatusNotFound, "用户不存在")
+			return
+		}
+	}
+	if target.Role == "superadmin" && countSuperadmins() <= 1 {
+		Fail(c, http.StatusBadRequest, "不能删除系统内唯一的超级管理员")
+		return
+	}
+	res := database.DB.Where("id = ?", target.ID).Delete(&model.User{})
 	if res.RowsAffected == 0 {
-		Fail(c, http.StatusNotFound, "用户不存在或不属于当前租户视角 (超级管理员请先切换租户视角)")
+		Fail(c, http.StatusNotFound, "删除用户失败")
 		return
 	}
 	Ok(c, gin.H{"id": id, "deleted": true})
@@ -252,6 +302,27 @@ func maskedSecret(secret string, visible bool) string {
 		return ""
 	}
 	return "******"
+}
+
+// validSystemRole 校验系统角色白名单
+func validSystemRole(role string) bool {
+	switch role {
+	case "superadmin", "admin", "operator", "viewer":
+		return true
+	}
+	return false
+}
+
+// countSuperadmins 统计现存超级管理员数量 (用于防止平台失去最高管理员)
+func countSuperadmins() int64 {
+	var cnt int64
+	database.DB.Model(&model.User{}).Where("role = ? AND status = 1", "superadmin").Count(&cnt)
+	return cnt
+}
+
+// confirmArg 读取二次确认标记 (query 或 json 均可由调用方预先解析后传入)
+func confirmArg(c *gin.Context, key string) bool {
+	return c.Query(key) == "1" || c.GetHeader("X-Confirm") == "1"
 }
 
 // defaultTenantIDOrDefault 自动建号归属租户兜底：0 表示沿用配置所属租户，仍为空则回退默认租户 1

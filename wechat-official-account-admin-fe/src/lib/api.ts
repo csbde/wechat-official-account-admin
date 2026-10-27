@@ -30,8 +30,9 @@ api.interceptors.request.use((config) => {
     config.headers.Authorization = `Bearer ${token}`
   }
 
-  // 超级管理员代管其他租户时携带视角标识，后端会二次校验该租户存在且已启用
-  if (activeTenantId && user && activeTenantId !== user.tenant_id) {
+  // 超级管理员显式选择了某个租户视角时携带该头(含自己的租户)，后端会校验租户存在且启用，
+  // 并按该视角严格收口数据；不携带该头时超级管理员保留平台级跨租户能力。
+  if (activeTenantId && activeTenantId > 0) {
     config.headers['X-Tenant-ID'] = String(activeTenantId)
   }
 
@@ -55,11 +56,10 @@ api.interceptors.response.use(
     // 后端在租户视角不可用时会回写 X-Tenant-Fallback，前端据此自动纠正，避免卡在失效视角
     const fallback = response.headers?.['x-tenant-fallback']
     if (fallback) {
-      const id = Number(fallback)
       const st = useAuthStore.getState()
-      if (st.activeTenantId && id > 0 && st.activeTenantId !== id) {
-        st.setActiveTenantId(id === st.user?.tenant_id ? null : id)
-        toast.error(`目标租户视角不可用，已自动切换回${id === st.user?.tenant_id ? '本租户' : '租户 #' + id}`)
+      if (st.activeTenantId) {
+        st.setActiveTenantId(null)
+        toast.error('你选择的租户视角已不可用 (被停用或删除)，已自动切回平台全局视角')
       }
     }
 

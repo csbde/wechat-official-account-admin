@@ -29,6 +29,7 @@ import {
   QrCode,
   Layers,
   Settings,
+  Building2,
 } from 'lucide-react'
 import { AuthorizerDetailView } from './AuthorizerDetail'
 import { TenantScopeBanner } from '@/components/common/TenantScopeBanner'
@@ -60,7 +61,33 @@ export const AccountsPage: React.FC = () => {
 
   const queryClient = useQueryClient()
   const { currentApp, setCurrentApp } = useAppStore()
-  const { user } = useAuthStore()
+  const { user, tenant: ownTenant, activeTenantId } = useAuthStore()
+  const isSuperAdmin = user?.role === 'superadmin'
+  const [transferTarget, setTransferTarget] = useState<any>(null)
+  const [transferTenantId, setTransferTenantId] = useState<number>(0)
+
+  const { data: tenantOptions } = useQuery<any[]>({
+    queryKey: ['system-tenant-options'],
+    queryFn: () => api.get('/api/system/tenants/options'),
+    enabled: isSuperAdmin,
+    retry: 0,
+  })
+  const { data: allTenants } = useQuery<any[]>({
+    queryKey: ['system-tenants'],
+    queryFn: () => api.get('/api/system/tenants'),
+    enabled: isSuperAdmin,
+    retry: 0,
+  })
+
+  const transferMutation = useMutation({
+    mutationFn: ({ id, tenant_id }: any) => api.post(`/api/accounts/${id}/transfer-tenant`, { tenant_id }),
+    onSuccess: (res: any) => {
+      toast.success(res?.message || '迁移完成')
+      setTransferTarget(null)
+      queryClient.invalidateQueries({ queryKey: ['accounts'] })
+      queryClient.invalidateQueries({ queryKey: ['system-tenants'] })
+    },
+  })
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
@@ -414,6 +441,16 @@ export const AccountsPage: React.FC = () => {
                   {/* 底部操作条 */}
                   <div className="pt-2 flex items-center justify-between border-t border-border/50">
                     <div className="flex items-center gap-1">
+                      {(acc as any).tenant_missing && (
+                        <Badge variant="destructive" className="text-[10px]">
+                          租户记录缺失
+                        </Badge>
+                      )}
+                      {isSuperAdmin && (acc as any).tenant_name && (acc as any).tenant_id !== ownTenant?.id && (
+                        <Badge variant="secondary" className="text-[10px]">
+                          归属：{(acc as any).tenant_name}
+                        </Badge>
+                      )}
                       {isSelected ? (
                         <Badge variant="outline" className="text-primary border-primary gap-1">
                           <Check className="h-3 w-3" />
@@ -444,6 +481,20 @@ export const AccountsPage: React.FC = () => {
                           className="h-8 w-8 text-muted-foreground hover:text-amber-500"
                         >
                           <Star className="h-4 w-4" />
+                        </Button>
+                      )}
+                      {isSuperAdmin && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="迁移该公众号到其它租户 (含其菜单/素材/粉丝等数据)"
+                          onClick={() => {
+                            setTransferTarget(acc)
+                            setTransferTenantId(0)
+                          }}
+                          className="h-8 w-8 text-muted-foreground hover:text-sky-500"
+                        >
+                          <Building2 className="h-4 w-4" />
                         </Button>
                       )}
                       <Button
@@ -725,6 +776,63 @@ export const AccountsPage: React.FC = () => {
           ) : currentDetail ? (
             <AuthorizerDetailView detail={currentDetail} onClose={() => setDetailModalOpen(false)} />
           ) : null}
+        </DialogContent>
+      </Dialog>
+
+      {/* 超级管理员：公众号跨租户迁移 */}
+      <Dialog open={!!transferTarget} onOpenChange={(v) => !v && setTransferTarget(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Building2 className="h-5 w-5 text-sky-600" />
+              <span>迁移公众号归属租户</span>
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2 text-sm">
+            <div className="text-xs text-muted-foreground leading-relaxed">
+              将 <span className="font-semibold text-foreground">{transferTarget?.name}</span>
+              <span className="font-mono"> ({transferTarget?.appid})</span> 及其
+              <strong>菜单 / 素材 / 自动回复 / 粉丝 / 标签 / 二维码 / AI 设置 / 日志</strong> 一并迁移到目标租户。
+              迁移后原租户将看不到该公众号，请用目标租户的成员或切换视角继续管理。
+            </div>
+            {(transferTarget as any)?.tenant_missing && (
+              <div className="text-[11px] text-destructive">
+                该公众号当前归属的租户记录已不存在 (数据残留)，建议迁移到一个正式租户，否则无人可管理它。
+              </div>
+            )}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold">目标租户 *</label>
+              <select
+                value={transferTenantId}
+                onChange={(e) => setTransferTenantId(Number(e.target.value))}
+                className="w-full h-9 rounded-lg border border-input bg-background px-3 text-sm"
+              >
+                <option value={0}>请选择目标租户...</option>
+                {(allTenants || [])
+                  .filter((t: any) => t.status === 1 && t.id !== transferTarget?.tenant_id)
+                  .map((t: any) => (
+                    <option key={t.id} value={t.id}>
+                      #{t.id} {t.name} ({t.code}){t.ghost ? ' · 数据残留租户' : ''}
+                    </option>
+                  ))}
+              </select>
+              <p className="text-[11px] text-muted-foreground">
+                列表仅展示已启用且当前未持有相同 AppID 的租户；同一微信账号不允许被两个租户同时接入。
+              </p>
+            </div>
+            <DialogFooter className="pt-2">
+              <Button variant="outline" onClick={() => setTransferTarget(null)}>取消</Button>
+              <Button
+                disabled={!transferTenantId || transferMutation.isPending}
+                onClick={() => {
+                  if (!window.confirm('迁移会改变该公众号及其业务数据的租户归属，确认执行？')) return
+                  transferMutation.mutate({ id: transferTarget.id, tenant_id: transferTenantId })
+                }}
+              >
+                {transferMutation.isPending ? '迁移中...' : '确认迁移'}
+              </Button>
+            </DialogFooter>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

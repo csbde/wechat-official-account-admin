@@ -165,6 +165,8 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 		protected.DELETE("/accounts/:id", accountHandler.Delete)
 		protected.POST("/accounts/:id/set-default", accountHandler.SetDefault)
 		protected.GET("/accounts/:id/authorizer-info", accountHandler.GetAuthorizerDetail)
+		// 迁移公众号归属租户 (仅超级管理员；事务内连同该 AppID 的业务数据一起搬家)
+		protected.POST("/accounts/:id/transfer-tenant", accountHandler.TransferTenant)
 
 		// 系统用户与日志管理 (租户隔离)
 		logHandler := &handler.LogHandler{}

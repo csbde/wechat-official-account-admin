@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 // CORS 跨域中间件
@@ -156,11 +158,28 @@ func JWTAuth() gin.HandlerFunc {
 					return
 				}
 				var cnt int64
-				database.DB.Model(&model.Tenant{}).Where("id = ? AND status = 1", tid).Count(&cnt)
+				var tenantRow model.Tenant
+				tenantErr := database.DB.First(&tenantRow, tid).Error
+				if tenantErr == nil {
+					if tenantRow.Status == 1 {
+						cnt = 1
+					}
+				} else if errors.Is(tenantErr, gorm.ErrRecordNotFound) {
+					// 租户记录缺失(历史数据或被硬删除)，但其 ID 仍被账号/成员引用：
+					// 允许超级管理员切到该"幽灵租户"视角，把遗留数据找回并纠正归属。
+					var refCount int64
+					database.DB.Unscoped().Model(&model.WxAccount{}).Where("tenant_id = ?", tid).Count(&refCount)
+					if refCount == 0 {
+						database.DB.Unscoped().Model(&model.User{}).Where("tenant_id = ?", tid).Count(&refCount)
+					}
+					cnt = refCount
+				}
 				if cnt > 0 {
 					c.Set("tenant_id", uint(tid))
+					// 只要显式携带了有效的 X-Tenant-ID，就按该视角严格收口(即使等于本人租户)，
+					// 这样超级管理员可以主动选择"只管理某个租户"；不带该头时保留平台级跨租户能力。
+					c.Set("tenant_view", true)
 					if uint(tid) != claims.TenantID {
-						c.Set("tenant_view", true)
 						logger.Warn("Superadmin switched tenant view",
 							zap.Uint("home_tenant_id", claims.TenantID),
 							zap.Uint("view_tenant_id", uint(tid)),
@@ -243,8 +262,18 @@ func TenantAppID(required bool) gin.HandlerFunc {
 		roleVal, _ := c.Get("role")
 		role, _ := roleVal.(string)
 
-		// 所有角色（含超级管理员）一律按“当前租户视角”校验 AppID 归属：
-		// 超级管理员需要操作其他租户时，必须通过 X-Tenant-ID 显式切换视角，留下明确的审计上下文。
+		// 超级管理员未显式切换视角时保持平台运维语义(可访问任意租户的 AppID)；
+		// 一旦显式切换视角或为普通成员，则严格按“当前租户视角”校验归属，越权直接 403。
+		switched := false
+		if v, ok := c.Get("tenant_view"); ok {
+			switched, _ = v.(bool)
+		}
+		if role == "superadmin" && !switched {
+			c.Set("appid", appid)
+			c.Next()
+			return
+		}
+
 		var count int64
 		database.DB.Model(&model.WxAccount{}).
 			Where("app_id = ? AND tenant_id = ?", appid, tenantID).
@@ -261,7 +290,7 @@ func TenantAppID(required bool) gin.HandlerFunc {
 			)
 			extra := ""
 			if role == "superadmin" {
-				extra = "（超级管理员请先在顶栏切换到该账号所属租户视角）"
+				extra = "（你已切换到租户视角，请先切回该账号所属租户视角）"
 			}
 			c.JSON(http.StatusForbidden, gin.H{
 				"code":    403,

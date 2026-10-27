@@ -44,7 +44,10 @@ export const TenantScopeBanner: React.FC<{ extra?: string }> = ({ extra }) => {
         {view ? '代管视角' : '本租户'}
       </Badge>
       <span className="opacity-80">
-        {extra || '此处新增的公众号、菜单、素材、粉丝等数据都将归属该租户，与其他租户完全隔离'}
+        {extra ||
+          (isSuperAdmin && !view
+            ? '超级管理员默认可跨租户查看全部公众号；此处新建的公众号会落入你的本租户，需为其他组织录入请先在顶栏切换租户视角'
+            : '此处新增的公众号、菜单、素材、粉丝等数据都将归属该租户，与其他租户完全隔离')}
       </span>
     </div>
   )

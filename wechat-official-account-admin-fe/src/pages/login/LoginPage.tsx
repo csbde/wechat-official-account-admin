@@ -7,7 +7,7 @@ import { useAuthStore } from '@/stores/auth'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Radio, Lock, User, ArrowRight, ShieldCheck, Key, Fingerprint, Mail } from 'lucide-react'
+import { Radio, Lock, User, ArrowRight, ShieldCheck, Fingerprint, Mail } from 'lucide-react'
 import { toast } from 'sonner'
 
 const loginSchema = z.object({
@@ -24,9 +24,10 @@ export const LoginPage: React.FC = () => {
 
   const form = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),
+    // 出于安全考虑，登录页不再预填任何默认凭据
     defaultValues: {
-      username: 'admin',
-      password: 'admin123',
+      username: '',
+      password: '',
     },
   })
 
@@ -43,12 +44,6 @@ export const LoginPage: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }
-
-  const handleQuickFill = () => {
-    form.setValue('username', 'admin')
-    form.setValue('password', 'admin123')
-    toast.info('已快速填入初始管理员账号: admin / admin123')
   }
 
   // 发起 OIDC 单点登录 (自动按邮箱匹配)
@@ -118,7 +113,7 @@ export const LoginPage: React.FC = () => {
                 </label>
                 <Input
                   type="password"
-                  placeholder="admin123"
+                  placeholder="请输入登录密码"
                   {...form.register('password')}
                   className="bg-background/60"
                 />
@@ -141,15 +136,8 @@ export const LoginPage: React.FC = () => {
           </CardContent>
 
           <CardFooter className="flex flex-col gap-3 pt-0 border-t border-border/40 mt-2">
-            <div className="w-full flex items-center justify-between text-xs text-muted-foreground pt-4">
-              <button
-                type="button"
-                onClick={handleQuickFill}
-                className="hover:text-primary transition-colors flex items-center gap-1 text-primary font-medium"
-              >
-                <Key className="h-3.5 w-3.5" />
-                <span>填入初始账号 (admin / admin123)</span>
-              </button>
+            <div className="w-full flex items-center justify-center text-[11px] text-muted-foreground pt-3">
+              <span>请使用管理员分配的账号登录；忘记密码或首次使用请联系平台超级管理员</span>
             </div>
 
             {/* OIDC 企业单点登录按钮 */}

@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"syscall"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/anchel/wechat-official-account-admin/config"
@@ -186,6 +186,33 @@ func initDefaultTenantAndAdmin(db *gorm.DB) {
 		}
 		db.Create(&admin)
 		logger.Info("Default superadmin user created: admin / admin123 (Tenant: 1)")
+	}
+
+	// 关键自愈: 保证系统内始终存在超级管理员。
+	// 历史版本可能把初始账号建成 admin 角色；也可能 OIDC/SSO 自动建号抢先占用了 "admin"
+	// 用户名(角色为 operator/admin)，导致上面的初始化被永久跳过 —— 结果是全系统没有任何
+	// 超级管理员，租户与组织、OIDC 单点登录等系统级功能无人可用 (表现为"是管理员却没有超管权限")。
+	// 策略: 仅在"完全没有超级管理员"时提升一个账号(优先用户名为 admin，否则取最早创建的启用账号)，
+	// 属于只增不减权的幂等操作，不会降低任何现有成员的权限。
+	var superCount int64
+	db.Model(&model.User{}).Where("role = ? AND status = 1", "superadmin").Count(&superCount)
+	if superCount == 0 {
+		var target model.User
+		if err := db.Where("username = ? AND status = 1", "admin").First(&target).Error; err != nil {
+			if err2 := db.Where("status = 1").Order("id asc").First(&target).Error; err2 != nil {
+				logger.Warn("未找到可提升为超级管理员的用户，请手工创建账号后重试")
+				return
+			}
+		}
+		originalRole := target.Role
+		if err := db.Model(&target).Update("role", "superadmin").Error; err != nil {
+			logger.Error("提升超级管理员失败", zap.Error(err))
+			return
+		}
+		logger.Warn(fmt.Sprintf(
+			"检测到系统内没有任何超级管理员，已自动提升用户 [%s] (ID=%d, 原角色=%s, 租户=%d) 为 superadmin；"+
+				"如非本人预期，请登录「系统与权限 → 后台用户」调整角色并另行指定超级管理员",
+			target.Username, target.ID, originalRole, target.TenantID))
 	}
 }
 

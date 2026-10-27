@@ -43,7 +43,7 @@ import { useAuthStore } from '@/stores/auth'
 
 export const SystemPage: React.FC = () => {
   const queryClient = useQueryClient()
-  const { user: currentUser } = useAuthStore()
+  const { user: currentUser, tenant: currentTenant, activeTenantId, setActiveTenantId } = useAuthStore()
   const isSuperAdmin = currentUser?.role === 'superadmin'
   const [viewAllTenants, setViewAllTenants] = useState(false)
 
@@ -76,6 +76,14 @@ export const SystemPage: React.FC = () => {
     queryKey: ['system-users', viewAllTenants ? 'all' : 'current'],
     queryFn: () => api.get('/api/system/users', { params: isSuperAdmin && viewAllTenants ? { all: 1 } : {} }),
   })
+
+  // 当前视角所在租户 (超级管理员代管其他租户时非空)
+  const { data: tenantRows } = useQuery<any[]>({
+    queryKey: ['system-tenants'],
+    queryFn: () => api.get('/api/system/tenants'),
+    retry: 0,
+  })
+  const viewTenant = activeTenantId ? tenantRows?.find((t) => t.id === activeTenantId) : null
 
   // 租户下拉选项 (超级管理员分配用户归属租户时使用)
   const { data: tenantOptions } = useQuery<any[]>({
@@ -115,7 +123,9 @@ export const SystemPage: React.FC = () => {
   const saveUserMutation = useMutation({
     mutationFn: (values: any) => {
       if (editingUserId) {
-        return api.put(`/api/system/users/${editingUserId}`, values)
+        const { confirmSelfDemote, ...rest } = values
+        const qs = confirmSelfDemote ? '?confirm=1' : ''
+        return api.put(`/api/system/users/${editingUserId}${qs}`, rest)
       }
       return api.post('/api/system/users', values)
     },
@@ -205,6 +215,16 @@ export const SystemPage: React.FC = () => {
       toast.error('用户名和密码不能为空')
       return
     }
+    // 降权自己的超级管理员身份需要显式二次确认，避免把自己锁在系统之外
+    const selfDemote =
+      !!editingUserId &&
+      editingUserId === currentUser?.id &&
+      currentUser?.role === 'superadmin' &&
+      role !== 'superadmin'
+    if (selfDemote && !window.confirm(
+      '你正在取消自己的「超级管理员」身份，改完后你将无法管理租户与 OIDC 单点登录。\n\n请确认系统里已经有其他超级管理员，再点击确定。')) {
+      return
+    }
     saveUserMutation.mutate({
       username,
       email: email.trim() || undefined,
@@ -212,6 +232,7 @@ export const SystemPage: React.FC = () => {
       nickname,
       role,
       tenant_id: isSuperAdmin ? userTenantId : undefined,
+      confirmSelfDemote: selfDemote,
     })
   }
 
@@ -262,6 +283,64 @@ export const SystemPage: React.FC = () => {
           </Button>
         </div>
       </div>
+
+      {/* 当前登录身份与权限边界 (解答"我是管理员为什么没有超管权限") */}
+      <Card className={isSuperAdmin ? 'border-emerald-500/30' : 'border-amber-500/40'}>
+        <CardContent className="pt-5 pb-4">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+            <div className="flex items-center gap-2 font-semibold text-sm">
+              <Shield className="h-4 w-4 text-primary" />
+              <span>当前登录身份</span>
+            </div>
+            <span className="font-mono">{currentUser?.username}</span>
+            <Badge variant={isSuperAdmin ? 'success' : 'secondary'} className="text-[10px]">
+              {currentUser?.role || '未知角色'}
+            </Badge>
+            <span className="text-muted-foreground">
+              所属租户：
+              <span className="text-foreground font-medium">{currentTenant?.name || '默认组织'}</span>
+              <span className="font-mono opacity-70">
+                {' '}
+                ({currentTenant?.code || 'default'} · #{currentUser?.tenant_id ?? 1})
+              </span>
+            </span>
+            {viewTenant ? (
+              <Badge variant={viewTenant.is_home ? 'success' : 'default'} className="text-[10px]">
+                {viewTenant.is_home ? '已锁定本租户视角' : `已锁定视角：${viewTenant.name}`}
+              </Badge>
+            ) : isSuperAdmin ? (
+              <Badge variant="secondary" className="text-[10px]">
+                平台全局视角 (跨租户可见)
+              </Badge>
+            ) : null}
+            {isSuperAdmin && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 text-[11px]"
+                onClick={() => {
+                  setActiveTenantId(viewTenant ? null : currentUser?.tenant_id ?? 1)
+                  queryClient.invalidateQueries()
+                }}
+              >
+                {viewTenant ? '返回平台全局视角' : '锁定到我的租户视角'}
+              </Button>
+            )}
+            {!isSuperAdmin && (
+              <span className="text-amber-700 dark:text-amber-400">
+                你不是平台超级管理员：无法新建租户、无法修改 OIDC 单点登录、看不到其他租户的数据。
+                如需这些能力，请让现有超级管理员在下方「后台用户列表」中把你的角色改为
+                <strong> Superadmin (平台超级管理员)</strong>。
+              </span>
+            )}
+            {isSuperAdmin && (
+              <span className="text-muted-foreground">
+                你拥有平台级权限：可在下方「租户与组织」新建/停用/删除租户，并可切换任意租户视角代运营。
+              </span>
+            )}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* 核心卡片 */}
       <div className="grid gap-4 md:grid-cols-3">
@@ -696,7 +775,17 @@ export const SystemPage: React.FC = () => {
               >
                 <option value="operator">Operator (运营操作员)</option>
                 <option value="admin">Admin (租户管理员)</option>
+                <option value="viewer">Viewer (只读访客)</option>
+                {isSuperAdmin && (
+                  <option value="superadmin">Superadmin (平台超级管理员 · 可管理租户与 SSO)</option>
+                )}
               </select>
+              {isSuperAdmin && (
+                <p className="text-[11px] text-muted-foreground">
+                  超级管理员是<strong>平台级</strong>身份：可查看/切换任意租户、创建租户、配置 OIDC。
+                  租户管理员 (admin) 的权限范围仅限自己租户，无法管理租户。
+                </p>
+              )}
             </div>
 
 

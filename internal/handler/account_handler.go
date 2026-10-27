@@ -4,12 +4,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/anchel/wechat-official-account-admin/internal/database"
+	"github.com/anchel/wechat-official-account-admin/internal/logger"
 	"github.com/anchel/wechat-official-account-admin/internal/model"
 	"github.com/anchel/wechat-official-account-admin/internal/service"
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 type AccountHandler struct{}
@@ -42,7 +46,9 @@ func (h *AccountHandler) List(c *gin.Context) {
 	var list []model.WxAccount
 
 	query := database.DB.Model(&model.WxAccount{})
-	scopeAll := IsSuperAdmin(c) && c.Query("all") == "1"
+	// 超级管理员默认可见全平台账号并标注归属租户；显式切换租户视角(X-Tenant-ID)后严格按视角过滤。
+	// 普通成员始终只能看到本租户数据；超管可用 ?all=0 只看当前视角。
+	scopeAll := SuperAdminHasFullCrossTenantAccess(c) && c.Query("all") != "0"
 	if !scopeAll {
 		query = query.Where("tenant_id = ?", tenantID)
 	}
@@ -59,10 +65,11 @@ func (h *AccountHandler) List(c *gin.Context) {
 	role, _ := c.Get("role")
 	isAdmin := role == "admin" || role == "superadmin"
 
+	// 租户名称映射(含已软删租户)：跨租户总览时明确标注每条数据的归属
 	tenantMap := make(map[uint]model.Tenant)
-	if scopeAll {
+	{
 		var tenants []model.Tenant
-		database.DB.Model(&model.Tenant{}).Select("id", "name", "code").Find(&tenants)
+		database.DB.Unscoped().Model(&model.Tenant{}).Select("id", "name", "code", "deleted_at").Find(&tenants)
 		for _, t := range tenants {
 			tenantMap[t.ID] = t
 		}
@@ -73,6 +80,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 		CallbackURL string `json:"callback_url"`
 		TenantName  string `json:"tenant_name,omitempty"`
 		TenantCode  string `json:"tenant_code,omitempty"`
+		TenantGone  bool   `json:"tenant_missing"`
 		Manageable  bool   `json:"manageable"`
 	}
 
@@ -86,11 +94,15 @@ func (h *AccountHandler) List(c *gin.Context) {
 		vo := AccountVO{
 			WxAccount:   acc,
 			CallbackURL: cb,
-			Manageable:  acc.TenantID == tenantID,
+			Manageable:  acc.TenantID == tenantID || SuperAdminHasFullCrossTenantAccess(c),
 		}
 		if t, ok := tenantMap[acc.TenantID]; ok {
 			vo.TenantName = t.Name
 			vo.TenantCode = t.Code
+			vo.TenantGone = t.DeletedAt.Valid
+		} else if acc.TenantID != 0 {
+			vo.TenantName = fmt.Sprintf("租户 #%d (记录缺失)", acc.TenantID)
+			vo.TenantGone = true
 		}
 		result[i] = vo
 	}
@@ -155,13 +167,11 @@ func (h *AccountHandler) Create(c *gin.Context) {
 
 // Update 更新公众号配置 (防越权校验)
 func (h *AccountHandler) Update(c *gin.Context) {
-	tenantID := GetTenantID(c)
 	id := c.Param("id")
 
-	// 严格按当前租户视角隔离：超级管理员如需维护其他租户，请先切换租户视角，避免误操作
-	var account model.WxAccount
-	if err := database.DB.Where("id = ? AND tenant_id = ?", id, tenantID).First(&account).Error; err != nil {
-		Fail(c, http.StatusNotFound, "公众号不存在或不属于当前租户视角 (超级管理员请先在顶栏切换租户视角)")
+	account, ok := FindAccountForManage(c, id)
+	if !ok {
+		Fail(c, http.StatusNotFound, AccountNotFoundMessage(c))
 		return
 	}
 
@@ -193,7 +203,7 @@ func (h *AccountHandler) Update(c *gin.Context) {
 		account.Enabled = *req.Enabled
 	}
 
-	if err := database.DB.Save(&account).Error; err != nil {
+	if err := database.DB.Save(account).Error; err != nil {
 		Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -203,12 +213,16 @@ func (h *AccountHandler) Update(c *gin.Context) {
 
 // Delete 删除公众号 (防越权校验)
 func (h *AccountHandler) Delete(c *gin.Context) {
-	tenantID := GetTenantID(c)
 	id := c.Param("id")
 
-	res := database.DB.Where("id = ? AND tenant_id = ?", id, tenantID).Delete(&model.WxAccount{})
+	account, ok := FindAccountForManage(c, id)
+	if !ok {
+		Fail(c, http.StatusNotFound, AccountNotFoundMessage(c))
+		return
+	}
+	res := database.DB.Where("id = ? AND tenant_id = ?", account.ID, account.TenantID).Delete(&model.WxAccount{})
 	if res.RowsAffected == 0 {
-		Fail(c, http.StatusNotFound, "公众号不存在或不属于当前租户视角 (超级管理员请先切换租户视角)")
+		Fail(c, http.StatusNotFound, "删除公众号失败")
 		return
 	}
 
@@ -217,28 +231,27 @@ func (h *AccountHandler) Delete(c *gin.Context) {
 
 // SetDefault 设为默认公众号 (防越权)
 func (h *AccountHandler) SetDefault(c *gin.Context) {
-	tenantID := GetTenantID(c)
 	id := c.Param("id")
 
-	var account model.WxAccount
-	if err := database.DB.Where("id = ? AND tenant_id = ?", id, tenantID).First(&account).Error; err != nil {
-		Fail(c, http.StatusNotFound, "公众号不存在或不属于当前租户视角 (超级管理员请先切换租户视角)")
+	account, ok := FindAccountForManage(c, id)
+	if !ok {
+		Fail(c, http.StatusNotFound, AccountNotFoundMessage(c))
 		return
 	}
 
-	database.DB.Model(&model.WxAccount{}).Where("tenant_id = ?", tenantID).Update("is_default", false)
-	database.DB.Model(&model.WxAccount{}).Where("id = ? AND tenant_id = ?", id, tenantID).Update("is_default", true)
+	// 默认标记只在账号所属租户内唯一，避免跨租户互相顶掉默认账号
+	database.DB.Model(&model.WxAccount{}).Where("tenant_id = ?", account.TenantID).Update("is_default", false)
+	database.DB.Model(&model.WxAccount{}).Where("id = ?", account.ID).Update("is_default", true)
 	Ok(c, gin.H{"status": "default_updated"})
 }
 
 // GetAuthorizerDetail 获取微信官方权威授权账号全量详情 (api_get_authorizer_info)
 func (h *AccountHandler) GetAuthorizerDetail(c *gin.Context) {
-	tenantID := GetTenantID(c)
 	id := c.Param("id")
 
-	var account model.WxAccount
-	if err := database.DB.Where("id = ? AND tenant_id = ?", id, tenantID).First(&account).Error; err != nil {
-		Fail(c, http.StatusNotFound, "公众号不存在或不属于当前租户视角 (超级管理员请先切换租户视角)")
+	account, ok := FindAccountForManage(c, id)
+	if !ok {
+		Fail(c, http.StatusNotFound, AccountNotFoundMessage(c))
 		return
 	}
 
@@ -252,7 +265,7 @@ func (h *AccountHandler) GetAuthorizerDetail(c *gin.Context) {
 			// 官方接口失败时降级返回本地已落库档案，避免前端整页空白
 			Ok(c, gin.H{
 				"account":         account,
-				"authorizer_info": localAuthorizerInfo(account),
+				"authorizer_info": localAuthorizerInfo(*account),
 				"func_info":       storedFuncInfo,
 				"source":          "local",
 				"official_error":  err.Error(),
@@ -291,7 +304,7 @@ func (h *AccountHandler) GetAuthorizerDetail(c *gin.Context) {
 			}
 		}
 		if len(updates) > 0 {
-			database.DB.Model(&account).Updates(updates)
+			database.DB.Model(account).Updates(updates)
 			if v, ok := updates["name"]; ok {
 				account.Name = v.(string)
 			}
@@ -328,7 +341,7 @@ func (h *AccountHandler) GetAuthorizerDetail(c *gin.Context) {
 	// 2. 普通直连公众号: 微信未向直连账号开放权威档案接口，返回本系统落库信息
 	Ok(c, gin.H{
 		"account":         account,
-		"authorizer_info": localAuthorizerInfo(account),
+		"authorizer_info": localAuthorizerInfo(*account),
 		"func_info":       storedFuncInfo,
 		"source":          "local",
 		"hint":            "该账号是「直连凭据」接入，微信开放平台的 api_get_authorizer_info 只对第三方平台授权托管的账号返回权威档案。若需微信官方主体全称、认证类型、权限集与账号二维码，请使用「微信扫码一键授权接入」重新托管该公众号。",
@@ -357,4 +370,142 @@ func parseStoredFuncInfo(raw string) []service.AuthorizerFuncInfo {
 		return []service.AuthorizerFuncInfo{}
 	}
 	return list
+}
+
+// TransferTenant 迁移公众号到另一个租户 (仅超级管理员)。
+// 用于纠正"账号建错了租户/遗留在已删除租户"的历史数据：在同一个事务内，
+// 把该 AppID 在源租户下的全部业务数据(菜单/素材/自动回复/粉丝/标签/二维码/AI/小程序设置/日志)一并搬家，
+// 避免只挪走账号而业务数据留在原租户形成孤立脏数据。
+func (h *AccountHandler) TransferTenant(c *gin.Context) {
+	if !IsSuperAdmin(c) {
+		Fail(c, http.StatusForbidden, "越权操作：仅超级管理员可以迁移公众号归属租户")
+		return
+	}
+
+	id := c.Param("id")
+	var req struct {
+		TenantID *uint `json:"tenant_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Fail(c, http.StatusBadRequest, "参数格式错误: "+err.Error())
+		return
+	}
+	if req.TenantID == nil || *req.TenantID == 0 {
+		Fail(c, http.StatusBadRequest, "请指定目标租户 ID")
+		return
+	}
+
+	account, ok := FindAccountForManage(c, id)
+	if !ok {
+		Fail(c, http.StatusNotFound, AccountNotFoundMessage(c))
+		return
+	}
+
+	var target model.Tenant
+	if err := database.DB.First(&target, *req.TenantID).Error; err != nil {
+		Fail(c, http.StatusBadRequest, "目标租户不存在 (id="+strconv.FormatUint(uint64(*req.TenantID), 10)+")")
+		return
+	}
+	if target.Status != 1 {
+		Fail(c, http.StatusBadRequest, "目标租户「"+target.Name+"」已停用，请先启用后再迁移")
+		return
+	}
+	if account.TenantID == target.ID {
+		Fail(c, http.StatusBadRequest, "该公众号已经归属租户「"+target.Name+"」，无需迁移")
+		return
+	}
+
+	// 目标租户内已有相同 AppID 时禁止迁移，避免破坏租户内 AppID 唯一性与凭据串号
+	var dup int64
+	database.DB.Model(&model.WxAccount{}).Where("app_id = ? AND tenant_id = ?", account.AppID, target.ID).Count(&dup)
+	if dup > 0 {
+		Fail(c, http.StatusBadRequest, "目标租户「"+target.Name+"」已存在相同 AppID 的公众号，请先删除重复记录后再迁移")
+		return
+	}
+
+	from := account.TenantID
+	appID := account.AppID
+
+	err := database.DB.Transaction(func(tx *gorm.DB) error {
+		moves := []struct {
+			name  string
+			value interface{}
+		}{
+			{"菜单", &model.WxMenu{}},
+			{"素材", &model.WxMaterial{}},
+			{"自动回复", &model.WxAutoReply{}},
+			{"粉丝", &model.WxFan{}},
+			{"标签", &model.WxTag{}},
+			{"带参二维码", &model.WxQrcode{}},
+			{"AI 助手设置", &model.WxAISetting{}},
+			{"小程序业务配置", &model.WxMiniSetting{}},
+			{"小程序注册任务", &model.WxMiniRegisterTask{}},
+			{"请求日志", &model.RequestLog{}},
+		}
+		for _, m := range moves {
+			if err := tx.Model(m.value).
+				Where("app_id = ? AND tenant_id = ?", appID, from).
+				Update("tenant_id", target.ID).Error; err != nil {
+				return fmt.Errorf("迁移%s失败: %w", m.name, err)
+			}
+		}
+		// 账号本体 (同时修正其租户内默认标记)
+		if err := tx.Model(&model.WxAccount{}).Where("id = ?", account.ID).Update("tenant_id", target.ID).Error; err != nil {
+			return fmt.Errorf("迁移公众号失败: %w", err)
+		}
+		var targetTotal int64
+		if err := tx.Model(&model.WxAccount{}).Where("tenant_id = ?", target.ID).Count(&targetTotal).Error; err != nil {
+			return err
+		}
+		if targetTotal == 1 {
+			if err := tx.Model(&model.WxAccount{}).Where("tenant_id = ?", target.ID).Update("is_default", true).Error; err != nil {
+				return err
+			}
+		} else {
+			var keepDefault int64
+			if err := tx.Model(&model.WxAccount{}).Where("tenant_id = ? AND is_default = ?", target.ID, true).Count(&keepDefault).Error; err != nil {
+				return err
+			}
+			if keepDefault == 0 {
+				if err := tx.Model(&model.WxAccount{}).Where("id = ?", account.ID).Update("is_default", true).Error; err != nil {
+					return err
+				}
+			}
+		}
+		// 源租户剩余账号中补选一个默认账号
+		var srcRemaining []model.WxAccount
+		if err := tx.Where("tenant_id = ?", from).Find(&srcRemaining).Error; err != nil {
+			return err
+		}
+		srcHasDefault := false
+		for _, a := range srcRemaining {
+			if a.IsDefault {
+				srcHasDefault = true
+				break
+			}
+		}
+		if len(srcRemaining) > 0 && !srcHasDefault {
+			if err := tx.Model(&model.WxAccount{}).Where("id = ?", srcRemaining[0].ID).Update("is_default", true).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		Fail(c, http.StatusInternalServerError, "迁移失败已回滚: "+err.Error())
+		return
+	}
+
+	logger.Info("Account transferred between tenants",
+		zap.String("appid", appID),
+		zap.Uint("from_tenant_id", from),
+		zap.Uint("to_tenant_id", target.ID),
+		zap.String("operator", c.GetString("username")),
+	)
+	Ok(c, gin.H{
+		"message":     fmt.Sprintf("公众号 %s 及其全部业务数据已从租户 #%d 迁移至「%s」", appID, from, target.Name),
+		"from_tenant": from,
+		"to_tenant":   target.ID,
+		"to_name":     target.Name,
+	})
 }

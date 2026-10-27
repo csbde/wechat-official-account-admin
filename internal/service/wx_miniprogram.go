@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/anchel/wechat-official-account-admin/internal/cache"
 	"github.com/anchel/wechat-official-account-admin/internal/logger"
 	"github.com/go-resty/resty/v2"
 	"go.uber.org/zap"
@@ -236,6 +237,33 @@ func (s *WxMiniService) GetLinkedMiniPrograms(ctx context.Context, officialAppID
 	}
 
 	return res.WxOpens.Items, nil
+}
+
+// LinkedMiniProgramsCached 带缓存的关联小程序列表 (默认 5 分钟)。
+// 「代码发布管理」等页面会高频读取该关系，缓存后可显著降低对微信接口的调用压力，
+// 关联关系变更(Link/Unlink)时会主动失效，保证一致性。
+func (s *WxMiniService) LinkedMiniProgramsCached(ctx context.Context, officialAppID string, ttl time.Duration) ([]LinkedMiniProgramItem, error) {
+	if ttl <= 0 {
+		ttl = 5 * time.Minute
+	}
+	cacheKey := "linked_mini:" + officialAppID
+	cm := cache.GetGateCacheManager()
+	if v, ok := cm.Get(cacheKey); ok {
+		if items, ok := v.([]LinkedMiniProgramItem); ok {
+			return items, nil
+		}
+	}
+	items, err := s.GetLinkedMiniPrograms(ctx, officialAppID)
+	if err != nil {
+		return nil, err
+	}
+	cm.Set(cacheKey, items, ttl)
+	return items, nil
+}
+
+// InvalidateLinkedMiniProgramsCache 清除某公众号的关联小程序缓存
+func (s *WxMiniService) InvalidateLinkedMiniProgramsCache(officialAppID string) {
+	cache.GetGateCacheManager().Delete("linked_mini:" + officialAppID)
 }
 
 // LinkMiniProgram 为公众号关联小程序 (cgi-bin/wxopen/wxamplink)

@@ -3,8 +3,10 @@ package handler
 import (
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/anchel/wechat-official-account-admin/internal/database"
 	"github.com/anchel/wechat-official-account-admin/internal/model"
@@ -321,7 +323,11 @@ func (h *MiniProgramHandler) GetLinkedMiniPrograms(c *gin.Context) {
 		return
 	}
 
-	items, err := service.DefaultWxMiniService.GetLinkedMiniPrograms(c.Request.Context(), officialAppID)
+	// 默认走 5 分钟缓存以扛住高频访问；?refresh=1 强制回源微信
+	if c.Query("refresh") == "1" {
+		service.DefaultWxMiniService.InvalidateLinkedMiniProgramsCache(officialAppID)
+	}
+	items, err := service.DefaultWxMiniService.LinkedMiniProgramsCached(c.Request.Context(), officialAppID, 5*time.Minute)
 	if err != nil {
 		Fail(c, http.StatusInternalServerError, "获取关联小程序失败: "+err.Error())
 		return
@@ -356,6 +362,7 @@ func (h *MiniProgramHandler) LinkMiniProgram(c *gin.Context) {
 		return
 	}
 
+	service.DefaultWxMiniService.InvalidateLinkedMiniProgramsCache(officialAppID)
 	Ok(c, gin.H{
 		"message": "关联申请已成功提交至微信！若需小程序管理员确认，请等待对方在微信中确认",
 	})
@@ -382,6 +389,7 @@ func (h *MiniProgramHandler) UnlinkMiniProgram(c *gin.Context) {
 		return
 	}
 
+	service.DefaultWxMiniService.InvalidateLinkedMiniProgramsCache(officialAppID)
 	Ok(c, gin.H{
 		"message": "小程序已成功解绑",
 	})
@@ -507,30 +515,75 @@ func requireMiniApp(c *gin.Context) string {
 	return appid
 }
 
-// ListMiniApps 获取当前租户下的账号列表 (默认只返回小程序，供「代码发布管理」选择目标小程序)
-// kind=miniprogram(默认) | official | all
+// ListMiniApps 获取可作为「代码发布管理」目标的小程序列表。
+//
+// 数据来源有两处，必须合并，否则会漏：
+//  1. 本系统已接入的账号 (扫码授权/快速注册开通的小程序)；
+//  2. 微信侧「公众号关联的小程序」(wxamplinkget) —— 这些小程序只是关联关系，
+//     并未把第三方平台的代运营权限授权进来，因此可以看见但无法直接代传代码，
+//     需要小程序管理员单独扫码授权 (早期版本只查本地账号，导致"公众号明明有关联小程序
+//     却提示没有小程序帐号")。
+//
+// kind=miniprogram(默认) | official | all ；linked=0 可跳过微信关联关系查询
 func (h *MiniProgramHandler) ListMiniApps(c *gin.Context) {
 	tenantID := GetTenantID(c)
 	kind := strings.TrimSpace(c.DefaultQuery("kind", "miniprogram"))
+	includeLinked := c.Query("linked") != "0"
 
 	var list []model.WxAccount
-	database.DB.Where("tenant_id = ? AND enabled = ?", tenantID, true).
+	database.DB.Where("tenant_id = ?", tenantID).
 		Order("account_type asc, id asc").Find(&list)
 
-	out := make([]gin.H, 0, len(list))
+	// 1) 汇总本租户内所有「第三方代管公众号」的关联小程序 (微信权威关系)
+	linked := map[string]service.LinkedMiniProgramItem{}
+	linkedErrors := make([]gin.H, 0, 2)
+	if includeLinked {
+		for _, a := range list {
+			if !a.IsThirdPartyManaged() || a.AccountType == "miniprogram" || !a.Enabled {
+				continue
+			}
+			items, err := service.DefaultWxMiniService.LinkedMiniProgramsCached(c.Request.Context(), a.AppID, 5*time.Minute)
+			if err != nil {
+				linkedErrors = append(linkedErrors, gin.H{
+					"official_appid": a.AppID,
+					"official_name":  a.Name,
+					"error":          err.Error(),
+				})
+				continue
+			}
+			for _, it := range items {
+				if it.AppID == "" {
+					continue
+				}
+				linked[it.AppID] = it
+			}
+		}
+	}
+
+	// 2) 本地账号 (并借助微信关联关系自愈账号类型: 出现在关联列表里的必然是小程序)
+	out := make([]gin.H, 0, len(list)+len(linked))
+	seen := make(map[string]bool, len(list)+len(linked))
 	for _, a := range list {
 		isMini := a.AccountType == "miniprogram"
+		if !isMini {
+			if _, ok := linked[a.AppID]; ok {
+				isMini = true
+				database.DB.Model(&model.WxAccount{}).Where("id = ?", a.ID).Update("account_type", "miniprogram")
+			}
+		}
 		switch kind {
 		case "official":
 			if isMini {
 				continue
 			}
 		case "all":
-		default: // miniprogram
+		default:
 			if !isMini {
 				continue
 			}
 		}
+		seen[a.AppID] = true
+		_, isLinked := linked[a.AppID]
 		out = append(out, gin.H{
 			"id":             a.ID,
 			"name":           a.Name,
@@ -539,10 +592,48 @@ func (h *MiniProgramHandler) ListMiniApps(c *gin.Context) {
 			"account_type":   a.AccountType,
 			"is_miniprogram": isMini,
 			"managed":        a.IsThirdPartyManaged(),
+			"authorized":     a.IsThirdPartyManaged(),
+			"linked":         isLinked,
+			"enabled":        a.Enabled,
 			"avatar_url":     a.AvatarURL,
+			"source":         "local",
 		})
 	}
-	Ok(c, out)
+
+	// 3) 微信里已关联、但本系统还没有该小程序凭据的目标 (可见但不可直接代管)
+	if kind != "official" {
+		appids := make([]string, 0, len(linked))
+		for appid := range linked {
+			if !seen[appid] {
+				appids = append(appids, appid)
+			}
+		}
+		sort.Strings(appids)
+		for _, appid := range appids {
+			it := linked[appid]
+			out = append(out, gin.H{
+				"id":             0,
+				"name":           it.Nickname,
+				"appid":          it.AppID,
+				"original_id":    it.Username,
+				"account_type":   "miniprogram",
+				"is_miniprogram": true,
+				"managed":        false,
+				"authorized":     false,
+				"linked":         true,
+				"link_status":    it.Status,
+				"avatar_url":     it.HeadImgURL,
+				"source":         "wx_linked",
+				"hint":           "该小程序已被公众号关联，但尚未把「第三方平台代运营权限」授权给本系统，因此无法直接代传代码/提审。请让该小程序管理员在「公众号与开放平台 → 微信扫码一键授权接入」中完成授权（授权时勾选小程序相关权限集），或使用「小程序快速注册」开通后自动接入。",
+			})
+		}
+	}
+
+	Ok(c, gin.H{
+		"list":          out,
+		"linked_errors": linkedErrors,
+		"linked_total":  len(linked),
+	})
 }
 
 // CommitCode 使用代码模板为小程序提交代码 (wxa/commit)

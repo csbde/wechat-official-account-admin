@@ -49,7 +49,6 @@ export const CodeManagePanel: React.FC = () => {
   const queryClient = useQueryClient()
   const [targetApp, setTargetApp] = useState('')
   const [subTab, setSubTab] = useState('overview')
-  const ready = !!targetApp
 
   // 所有请求统一携带 appid，后端 TenantAppID 中间件会强制校验该小程序归属当前租户
   const withApp = useMemo(
@@ -65,17 +64,25 @@ export const CodeManagePanel: React.FC = () => {
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['mini-code', targetApp] })
 
   /* --------------------------- 账号候选列表 --------------------------- */
-  // kind=miniprogram: 后端只返回真正的小程序账号，避免把公众号混进「目标小程序」列表
-  const { data: apps, isLoading: loadingApps } = useQuery<any[]>({
+  // kind=miniprogram: 后端合并两类来源 —— 本系统已接入的小程序账号 + 微信侧「公众号关联的小程序」，
+  // 后者只是关联关系、未把代运营权限授权给第三方平台，因此可见但不可直接代管代码。
+  const { data: appsRes, isLoading: loadingApps, error: appsError } = useQuery<any>({
     queryKey: ['miniprogram-apps', 'miniprogram'],
     queryFn: () => api.get('/api/miniprogram/apps?kind=miniprogram'),
+    retry: 0,
   })
+  const apps: any[] = appsRes?.list || []
+  const managedApps = apps.filter((a) => a.managed)
+  const unauthorizedApps = apps.filter((a) => !a.managed)
+  const linkedErrors: any[] = appsRes?.linked_errors || []
 
   React.useEffect(() => {
-    if (!targetApp && apps?.length) setTargetApp(apps[0].appid)
+    if (!targetApp && managedApps.length) setTargetApp(managedApps[0].appid)
   }, [apps, targetApp])
 
-  const targetAccount = (apps || []).find((a: any) => a.appid === targetApp)
+  const targetAccount = apps.find((a: any) => a.appid === targetApp)
+  // 只有已完成第三方授权托管的小程序才持有 authorizer_access_token，未托管时禁止发起代码管理请求
+  const ready = !!targetApp && !!targetAccount?.managed
 
   /* ------------------------------ 查询 ------------------------------ */
   const { data: latestAudit, isFetching: fetchingAudit } = useQuery<any>({
@@ -262,26 +269,55 @@ export const CodeManagePanel: React.FC = () => {
               className="w-full h-9 rounded-lg border border-input bg-background px-2.5 text-xs"
             >
               <option value="">
-                {loadingApps ? '正在加载小程序列表...' : (apps || []).length ? '请选择要管理代码的小程序...' : '当前租户下暂无小程序账号'}
+                {loadingApps
+                  ? '正在加载小程序列表...'
+                  : appsError
+                    ? '小程序列表加载失败'
+                    : apps.length
+                      ? '请选择要管理代码的小程序...'
+                      : '当前租户下既无已接入小程序，也无公众号关联的小程序'}
               </option>
-              {(apps || []).map((a: any) => (
-                <option key={a.appid} value={a.appid}>
-                  {a.name} · {a.appid} · {ACCOUNT_TYPE_LABEL[a.account_type] || a.account_type}
-                  {a.managed ? '' : ' (未托管，凭据不可用)'}
-                </option>
-              ))}
+              {managedApps.length > 0 && (
+                <optgroup label={`已接入本系统 · 可代管代码 (${managedApps.length})`}>
+                  {managedApps.map((a: any) => (
+                    <option key={a.appid} value={a.appid}>
+                      {a.name || a.appid} · {a.appid}
+                      {a.linked ? ' · 已关联公众号' : ''}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {unauthorizedApps.length > 0 && (
+                <optgroup label={`微信侧已关联 · 尚未授权接入本系统 (${unauthorizedApps.length})`}>
+                  {unauthorizedApps.map((a: any) => (
+                    <option key={a.appid} value={a.appid}>
+                      {a.name || a.appid} · {a.appid} · 需先扫码授权
+                    </option>
+                  ))}
+                </optgroup>
+              )}
             </select>
-            {(apps || []).length === 0 && !loadingApps && (
+            {apps.length === 0 && !loadingApps && !appsError && (
               <div className="text-[11px] text-amber-700 dark:text-amber-400 leading-relaxed pt-1">
-                代码发布管理只作用于<strong>小程序</strong>账号。可先在「微信小程序 → 快速注册小程序」免认证费开通，
+                代码发布管理只作用于<strong>小程序</strong>。可先在「微信小程序 → 快速注册小程序」免认证费开通，
                 或在「公众号与开放平台」用<strong>微信扫码一键授权</strong>把已有小程序托管给第三方平台
                 (微信官方档案中存在 MiniProgramInfo 时系统会自动识别为小程序)。
+                <span className="opacity-80"> 若公众号已关联小程序但仍显示为空，请确认该公众号本身是通过扫码授权托管的 (直连凭据无法查询关联关系)。</span>
+              </div>
+            )}
+            {linkedErrors.length > 0 && (
+              <div className="text-[11px] text-amber-700 dark:text-amber-400 leading-relaxed pt-1 space-y-0.5">
+                {linkedErrors.map((e: any, i: number) => (
+                  <div key={i}>
+                    读取公众号「{e.official_name || e.official_appid}」的关联小程序失败：{e.error}
+                  </div>
+                ))}
               </div>
             )}
             {targetAccount && !targetAccount.managed && (
               <div className="text-[11px] text-red-600 leading-relaxed pt-1">
-                该小程序尚未绑定第三方平台 (缺少 authorizer_refresh_token)，提交代码 / 提审 / 发布等接口无法取得调用凭据，
-                请先完成扫码授权托管。
+                {targetAccount.hint ||
+                  '该小程序尚未绑定第三方平台 (缺少 authorizer_refresh_token)，提交代码 / 提审 / 发布等接口无法取得调用凭据，请先完成扫码授权托管。'}
               </div>
             )}
           </div>
