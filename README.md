@@ -97,13 +97,16 @@
     - **合法域名代配置**：无需进入微信公众平台，直接代小程序配置合法 Request / Socket / Upload / Download 及业务 Webview 域名。
     - **免密登录网关 (Code2Session)**：集成 WXGate 网关能力，外部或移动端直接调用后端换取 OpenID 与 SessionKey，无需在移动端暴露 AppSecret。
 
-11. **公众号关联小程序管理 (Linked Mini Programs)**:
+11. **公众号关联小程序管理 (Linked Mini Programs — 公众号维度)**:
+    - **归属**：这是**公众号**的能力（使用公众号 `authorizer_access_token` 调用），管理的是"当前选中的公众号关联了哪些小程序"。
     - **微信官方通道**：调用 `cgi-bin/wxopen/wxamplinkget` 实时拉取已关联小程序列表，包含头像、昵称、原始ID、关联状态与绑定邮箱。
     - **一键关联与解绑**：支持向小程序发起绑定申请并可配置是否在公众号资料页中展示入口，支持随时解绑。
 
-12. **第三方平台小程序代码模板库与草稿箱 (Template Management)**:
+12. **小程序代码模板库与草稿箱 (Code Template Management — 小程序 / 开放平台维度)**:
+    - **归属**：这是**小程序**（代码发布包）的能力，且属于**微信开放平台第三方平台账号级全局资源**（使用 `component_access_token` 调用），既不隶属公众号，也不隶属单个小程序，一次入库可分发给任意已授权小程序。
     - **草稿箱一键入库**：直接拉取小程序开发者工具上传的代码草稿箱 (`gettemplatedraftlist`)，并支持一键转化为正式代码模板 (`addtotemplate`)。
-    - **模板版本版本库管理**：统一管理已收录的小程序代码模板 (`gettemplatelist`)，支持按类型过滤并支持删除过期模板 (`deltemplate`)。
+    - **模板库管理**：统一管理已收录的小程序代码模板 (`gettemplatelist`)，支持按类型过滤并支持删除过期模板 (`deltemplate`)。
+    - **易混淆提示**：此"代码模板库"与微信的"模板消息 (`template_id` 消息通知)"完全是两套体系，本模块仅涉及小程序代码版本模板。
 
 13. **微信官方权威档案与权限集详情 (Authorizer Detail)**:
     - 公众号列表操作栏提供「查看微信官方权威档案」按钮，调用 `api_get_authorizer_info` 实时获取微信官方原始数据。

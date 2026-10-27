@@ -64,7 +64,7 @@ function formatUnixSec(sec?: number) {
 const MINI_TABS = [
   { value: 'register', label: '快速注册任务', icon: Sparkles, color: 'text-amber-500' },
   { value: 'linked', label: '公众号关联小程序', icon: Link2, color: 'text-sky-500' },
-  { value: 'templates', label: '代码模板库', icon: Library, color: 'text-violet-500' },
+  { value: 'templates', label: '小程序代码模板库', icon: Library, color: 'text-violet-500' },
   { value: 'domain', label: '合法域名配置', icon: Globe, color: 'text-blue-500' },
   { value: 'code2session', label: '登录网关', icon: Key, color: 'text-emerald-500' },
 ] as const
@@ -292,7 +292,7 @@ export const MiniProgramPage: React.FC = () => {
             <Badge variant="success" className="text-xs">免 300 元认证费通道</Badge>
           </h2>
           <p className="text-sm text-muted-foreground">
-            快速免密开通小程序、公众号关联小程序管理、代码模板库/草稿箱、服务器域名代配置及登录网关
+            快速免密开通小程序、公众号维度关联小程序、开放平台代码模板库/草稿箱、服务器域名代配置及免密登录网关
           </p>
         </div>
 
@@ -474,7 +474,7 @@ export const MiniProgramPage: React.FC = () => {
           <div className="p-4 rounded-xl bg-sky-500/10 border border-sky-500/20 text-xs text-sky-900 dark:text-sky-200 flex items-start gap-3">
             <ShieldCheck className="h-5 w-5 text-sky-600 shrink-0 mt-0.5" />
             <div className="space-y-1 leading-relaxed">
-              <div className="font-semibold text-sm">ℹ️ 公众号关联小程序规则说明:</div>
+              <div className="font-semibold text-sm">ℹ️ 公众号关联小程序 (属于公众号维度，用公众号 access_token 调用):</div>
               <div>
                 1. 本功能作用于<strong>顶部当前选中的公众号</strong>
                 {currentApp ? (
@@ -584,10 +584,13 @@ export const MiniProgramPage: React.FC = () => {
           <div className="p-4 rounded-xl bg-violet-500/10 border border-violet-500/20 text-xs text-violet-900 dark:text-violet-200 flex items-start gap-3">
             <ShieldCheck className="h-5 w-5 text-violet-600 shrink-0 mt-0.5" />
             <div className="space-y-1 leading-relaxed">
-              <div className="font-semibold text-sm">📦 第三方平台代码发布流程:</div>
+              <div className="font-semibold text-sm">📦 小程序代码模板库 (属于小程序，与公众号无关):</div>
               <div>
                 开发者在使用<strong>小程序开发者工具</strong>上传代码后，代码会先进入<strong>草稿箱</strong>；
-                将草稿「加入模板库」得到 template_id，之后即可用该模板为已授权的小程序批量提审 / 发布。
+                将草稿「加入模板库」得到 template_id，之后即可用该模板为已授权的小程序批量提审 / 发布。<br />
+                <strong>归属说明</strong>：草稿箱与代码模板库是<strong>微信开放平台 (第三方平台) 账号级别的全局资源</strong>，
+                使用 <code className="font-mono">component_access_token</code> 调用，<strong>不隶属于任何公众号，也不隶属于单个小程序</strong>，
+                因此本标签页无需在顶部选择账号。
               </div>
             </div>
           </div>
