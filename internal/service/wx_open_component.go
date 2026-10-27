@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
-		"time"
+	"time"
 
 	"github.com/anchel/wechat-official-account-admin/internal/cache"
 	"github.com/anchel/wechat-official-account-admin/internal/database"
 	"github.com/anchel/wechat-official-account-admin/internal/logger"
 	"github.com/anchel/wechat-official-account-admin/internal/model"
-		"github.com/go-resty/resty/v2"
+	"github.com/go-resty/resty/v2"
 	"go.uber.org/zap"
 )
 
@@ -27,15 +27,15 @@ var DefaultWxOpenService = &WxOpenService{
 
 // OpenEventMessage 微信开放平台推送的 XML 报文
 type OpenEventMessage struct {
-	XMLName                    xml.Name `xml:"xml"`
-	AppId                      string   `xml:"AppId"`
-	CreateTime                 int64    `xml:"CreateTime"`
-	InfoType                   string   `xml:"InfoType"`
-	ComponentVerifyTicket      string   `xml:"ComponentVerifyTicket"`
-	AuthorizerAppid            string   `xml:"AuthorizerAppid"`
-	AuthorizationCode          string   `xml:"AuthorizationCode"`
-	AuthorizationCodeExpiredTime int64  `xml:"AuthorizationCodeExpiredTime"`
-	PreAuthCode                string   `xml:"PreAuthCode"`
+	XMLName                      xml.Name `xml:"xml"`
+	AppId                        string   `xml:"AppId"`
+	CreateTime                   int64    `xml:"CreateTime"`
+	InfoType                     string   `xml:"InfoType"`
+	ComponentVerifyTicket        string   `xml:"ComponentVerifyTicket"`
+	AuthorizerAppid              string   `xml:"AuthorizerAppid"`
+	AuthorizationCode            string   `xml:"AuthorizationCode"`
+	AuthorizationCodeExpiredTime int64    `xml:"AuthorizationCodeExpiredTime"`
+	PreAuthCode                  string   `xml:"PreAuthCode"`
 }
 
 // HandleComponentVerifyTicket 处理微信开放平台定时推送的 VerifyTicket 与授权变动事件
@@ -244,11 +244,11 @@ func (s *WxOpenService) QueryAuth(ctx context.Context, componentAppID, authCode 
 	avatarUrl := ""
 	authorizerInfo, err := s.GetAuthorizerInfo(ctx, componentAppID, info.AuthorizerAppid)
 	if err == nil && authorizerInfo != nil {
-		if nick, ok := authorizerInfo["nick_name"].(string); ok && nick != "" {
-			accountName = nick
+		if authorizerInfo.AuthorizerInfo.NickName != "" {
+			accountName = authorizerInfo.AuthorizerInfo.NickName
 		}
-		if head, ok := authorizerInfo["head_img"].(string); ok && head != "" {
-			avatarUrl = head
+		if authorizerInfo.AuthorizerInfo.HeadImg != "" {
+			avatarUrl = authorizerInfo.AuthorizerInfo.HeadImg
 		}
 	}
 
@@ -354,7 +354,39 @@ func (s *WxOpenService) RefreshAuthorizerToken(ctx context.Context, componentApp
 }
 
 // GetAuthorizerInfo 获取授权公众号的基本账号信息
-func (s *WxOpenService) GetAuthorizerInfo(ctx context.Context, componentAppID, authorizerAppID string) (map[string]interface{}, error) {
+// AuthorizerFullInfo 微信官方授权账号全量详细档案
+type AuthorizerFullInfo struct {
+	AuthorizerInfo struct {
+		NickName        string                 `json:"nick_name"`
+		HeadImg         string                 `json:"head_img"`
+		ServiceTypeInfo map[string]int         `json:"service_type_info"`
+		VerifyTypeInfo  map[string]int         `json:"verify_type_info"`
+		UserName        string                 `json:"user_name"` // 原始ID
+		Alias           string                 `json:"alias"`     // 微信号
+		QRCodeURL       string                 `json:"qrcode_url"`
+		PrincipalName   string                 `json:"principal_name"` // 主体公司/个人全称
+		Signature       string                 `json:"signature"`      // 账号功能介绍
+		BusinessInfo    map[string]interface{} `json:"business_info"`
+		MiniProgramInfo map[string]interface{} `json:"MiniProgramInfo,omitempty"`
+	} `json:"authorizer_info"`
+	AuthorizationInfo struct {
+		AuthorizerAppid        string `json:"authorizer_appid"`
+		AuthorizerRefreshToken string `json:"authorizer_refresh_token,omitempty"`
+		FuncInfo               []struct {
+			FuncscopeCategory struct {
+				ID int `json:"id"`
+			} `json:"funcscope_category"`
+			ConfirmInfo struct {
+				NeedConfirm    int `json:"need_confirm"`
+				AlreadyConfirm int `json:"already_confirm"`
+				CanConfirm     int `json:"can_confirm"`
+			} `json:"confirm_info,omitempty"`
+		} `json:"func_info"`
+	} `json:"authorization_info"`
+}
+
+// GetAuthorizerInfo 获取授权公众号或小程序的完整官方档案
+func (s *WxOpenService) GetAuthorizerInfo(ctx context.Context, componentAppID, authorizerAppID string) (*AuthorizerFullInfo, error) {
 	token, err := s.GetComponentAccessToken(ctx, componentAppID)
 	if err != nil {
 		return nil, err
@@ -371,10 +403,18 @@ func (s *WxOpenService) GetAuthorizerInfo(ctx context.Context, componentAppID, a
 	}
 
 	var res struct {
-		AuthorizerInfo map[string]interface{} `json:"authorizer_info"`
+		AuthorizerFullInfo
+		Errcode int    `json:"errcode"`
+		Errmsg  string `json:"errmsg"`
 	}
-	_ = json.Unmarshal(resp.Body(), &res)
-	return res.AuthorizerInfo, nil
+	if err := json.Unmarshal(resp.Body(), &res); err != nil {
+		return nil, fmt.Errorf("解析授权信息响应失败: %w", err)
+	}
+	if res.Errcode != 0 {
+		return nil, fmt.Errorf("[%d] %s", res.Errcode, res.Errmsg)
+	}
+
+	return &res.AuthorizerFullInfo, nil
 }
 
 // HandleNetworkPublishCheck 处理微信开放平台全网发布自动化测试用例

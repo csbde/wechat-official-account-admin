@@ -164,6 +164,7 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 		protected.PUT("/accounts/:id", accountHandler.Update)
 		protected.DELETE("/accounts/:id", accountHandler.Delete)
 		protected.POST("/accounts/:id/set-default", accountHandler.SetDefault)
+		protected.GET("/accounts/:id/authorizer-info", accountHandler.GetAuthorizerDetail)
 
 		// 系统用户与日志管理 (租户隔离)
 		logHandler := &handler.LogHandler{}
@@ -175,6 +176,15 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 		protected.GET("/system/oidc", systemHandler.GetOIDCSetting)
 		protected.POST("/system/oidc", systemHandler.SaveOIDCSetting)
 		protected.POST("/system/oidc/test", systemHandler.TestOIDCDiscovery)
+
+		// 微信小程序 (租户/平台级通用能力: 快速注册任务追踪与代码模板库/草稿箱)
+		protected.GET("/miniprogram/tasks", miniHandler.ListTasks)
+		protected.POST("/miniprogram/tasks", miniHandler.CreateTask)
+		protected.POST("/miniprogram/tasks/:id/refresh", miniHandler.RefreshTask)
+		protected.GET("/miniprogram/drafts", miniHandler.GetTemplateDrafts)
+		protected.GET("/miniprogram/templates", miniHandler.GetTemplates)
+		protected.POST("/miniprogram/templates/add-from-draft", miniHandler.AddTemplateFromDraft)
+		protected.DELETE("/miniprogram/templates/:id", miniHandler.DeleteTemplate)
 
 		// 微信业务相关接口 (必须携带 AppID，且经由 TenantAppID 严格防越权校验)
 		tenant := protected.Group("")
@@ -222,16 +232,15 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 
 			// 带参二维码
 			qrcodeHandler := &handler.QrcodeHandler{}
-	miniHandler := &handler.MiniProgramHandler{}
 			tenant.GET("/qrcode", qrcodeHandler.List)
 			tenant.POST("/qrcode", qrcodeHandler.Create)
 
-			// 微信小程序代开发与快速注册
-			tenant.GET("/miniprogram/tasks", miniHandler.ListTasks)
-			tenant.POST("/miniprogram/tasks", miniHandler.CreateTask)
-			tenant.POST("/miniprogram/tasks/:id/refresh", miniHandler.RefreshTask)
+			// 微信小程序代开发 (指定账号级别接口: 合法域名与公众号关联)
 			tenant.GET("/miniprogram/domain", miniHandler.GetDomain)
 			tenant.POST("/miniprogram/domain", miniHandler.SetDomain)
+			tenant.GET("/miniprogram/linked", miniHandler.GetLinkedMiniPrograms)
+			tenant.POST("/miniprogram/link", miniHandler.LinkMiniProgram)
+			tenant.POST("/miniprogram/unlink", miniHandler.UnlinkMiniProgram)
 		}
 	}
 

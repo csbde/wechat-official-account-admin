@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/anchel/wechat-official-account-admin/internal/database"
@@ -186,12 +188,12 @@ func (h *MiniProgramHandler) SetDomain(c *gin.Context) {
 	tenantID := GetTenantID(c)
 
 	var req struct {
-		Action          string `json:"action"` // set
-		RequestDomain   string `json:"requestdomain"`
-		WsDomain        string `json:"wsrequestdomain"`
-		UploadDomain    string `json:"uploaddomain"`
-		DownloadDomain  string `json:"downloaddomain"`
-		WebviewDomain   string `json:"webviewdomain"`
+		Action         string `json:"action"` // set
+		RequestDomain  string `json:"requestdomain"`
+		WsDomain       string `json:"wsrequestdomain"`
+		UploadDomain   string `json:"uploaddomain"`
+		DownloadDomain string `json:"downloaddomain"`
+		WebviewDomain  string `json:"webviewdomain"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		Fail(c, http.StatusBadRequest, err.Error())
@@ -283,4 +285,185 @@ func (h *MiniProgramHandler) Code2Session(c *gin.Context) {
 	}
 
 	Ok(c, res)
+}
+
+// GetLinkedMiniPrograms 获取当前微信公众号关联的小程序列表
+func (h *MiniProgramHandler) GetLinkedMiniPrograms(c *gin.Context) {
+	officialAppID := GetAppID(c)
+	if officialAppID == "" {
+		Fail(c, http.StatusBadRequest, "请在顶部先选择一个微信公众号")
+		return
+	}
+
+	items, err := service.DefaultWxMiniService.GetLinkedMiniPrograms(c.Request.Context(), officialAppID)
+	if err != nil {
+		Fail(c, http.StatusInternalServerError, "获取关联小程序失败: "+err.Error())
+		return
+	}
+
+	Ok(c, gin.H{
+		"official_appid": officialAppID,
+		"items":          items,
+	})
+}
+
+// LinkMiniProgram 为当前微信公众号关联指定小程序
+func (h *MiniProgramHandler) LinkMiniProgram(c *gin.Context) {
+	officialAppID := GetAppID(c)
+	if officialAppID == "" {
+		Fail(c, http.StatusBadRequest, "请在顶部先选择一个微信公众号")
+		return
+	}
+
+	var req struct {
+		MiniAppID   string `json:"appid" binding:"required"`
+		NotifyUsers int    `json:"notify_users"` // 0:不发, 1:发
+		ShowProfile int    `json:"show_profile"` // 0:不在资料页展示, 1:展示
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Fail(c, http.StatusBadRequest, "小程序 AppID 不能为空")
+		return
+	}
+
+	err := service.DefaultWxMiniService.LinkMiniProgram(c.Request.Context(), officialAppID, req.MiniAppID, req.NotifyUsers, req.ShowProfile)
+	if err != nil {
+		Fail(c, http.StatusInternalServerError, "微信接口返回错误: "+err.Error())
+		return
+	}
+
+	Ok(c, gin.H{
+		"message": "关联申请已成功提交至微信！若需小程序管理员确认，请等待对方在微信中确认",
+	})
+}
+
+// UnlinkMiniProgram 解除公众号与小程序的关联
+func (h *MiniProgramHandler) UnlinkMiniProgram(c *gin.Context) {
+	officialAppID := GetAppID(c)
+	if officialAppID == "" {
+		Fail(c, http.StatusBadRequest, "请在顶部先选择一个微信公众号")
+		return
+	}
+
+	var req struct {
+		MiniAppID string `json:"appid" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Fail(c, http.StatusBadRequest, "小程序 AppID 不能为空")
+		return
+	}
+
+	err := service.DefaultWxMiniService.UnlinkMiniProgram(c.Request.Context(), officialAppID, req.MiniAppID)
+	if err != nil {
+		Fail(c, http.StatusInternalServerError, "解绑失败: "+err.Error())
+		return
+	}
+
+	Ok(c, gin.H{
+		"message": "小程序已成功解绑",
+	})
+}
+
+// GetTemplateDrafts 获取代码草稿箱列表
+func (h *MiniProgramHandler) GetTemplateDrafts(c *gin.Context) {
+	tenantID := GetTenantID(c)
+	var comp model.WxOpenComponent
+	database.DB.Where("tenant_id = ? AND enabled = ?", tenantID, true).First(&comp)
+	if comp.ComponentAppID == "" {
+		database.DB.Where("enabled = ?", true).Order("id desc").First(&comp)
+	}
+
+	if comp.ComponentAppID == "" {
+		Fail(c, http.StatusBadRequest, "尚未配置微信开放平台第三方平台")
+		return
+	}
+
+	drafts, err := service.DefaultWxMiniService.GetTemplateDraftList(c.Request.Context(), comp.ComponentAppID)
+	if err != nil {
+		Fail(c, http.StatusInternalServerError, "获取代码草稿箱失败: "+err.Error())
+		return
+	}
+
+	Ok(c, drafts)
+}
+
+// GetTemplates 获取代码模板库列表
+func (h *MiniProgramHandler) GetTemplates(c *gin.Context) {
+	tenantID := GetTenantID(c)
+	var comp model.WxOpenComponent
+	database.DB.Where("tenant_id = ? AND enabled = ?", tenantID, true).First(&comp)
+	if comp.ComponentAppID == "" {
+		database.DB.Where("enabled = ?", true).Order("id desc").First(&comp)
+	}
+
+	if comp.ComponentAppID == "" {
+		Fail(c, http.StatusBadRequest, "尚未配置微信开放平台第三方平台")
+		return
+	}
+
+	tplType := 0
+	if v := c.Query("template_type"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			tplType = n
+		}
+	}
+
+	templates, err := service.DefaultWxMiniService.GetTemplateList(c.Request.Context(), comp.ComponentAppID, tplType)
+	if err != nil {
+		Fail(c, http.StatusInternalServerError, "获取代码模板库失败: "+err.Error())
+		return
+	}
+
+	Ok(c, templates)
+}
+
+// AddTemplateFromDraft 将草稿箱添加到正式模板库
+func (h *MiniProgramHandler) AddTemplateFromDraft(c *gin.Context) {
+	tenantID := GetTenantID(c)
+	var comp model.WxOpenComponent
+	database.DB.Where("tenant_id = ? AND enabled = ?", tenantID, true).First(&comp)
+	if comp.ComponentAppID == "" {
+		database.DB.Where("enabled = ?", true).Order("id desc").First(&comp)
+	}
+
+	var req struct {
+		DraftID      int `json:"draft_id" binding:"required"`
+		TemplateType int `json:"template_type"` // 0: 普通, 1: 标准
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Fail(c, http.StatusBadRequest, "草稿 ID 不能为空")
+		return
+	}
+
+	err := service.DefaultWxMiniService.AddDraftToTemplate(c.Request.Context(), comp.ComponentAppID, req.DraftID, req.TemplateType)
+	if err != nil {
+		Fail(c, http.StatusInternalServerError, "添加模板失败: "+err.Error())
+		return
+	}
+
+	Ok(c, gin.H{"message": "已成功将该草稿添加至正式小程序模板库！"})
+}
+
+// DeleteTemplate 删除指定小程序代码模板
+func (h *MiniProgramHandler) DeleteTemplate(c *gin.Context) {
+	tenantID := GetTenantID(c)
+	idStr := c.Param("id")
+	var templateID int
+	if _, err := fmt.Sscanf(idStr, "%d", &templateID); err != nil {
+		Fail(c, http.StatusBadRequest, "无效的模板 ID")
+		return
+	}
+
+	var comp model.WxOpenComponent
+	database.DB.Where("tenant_id = ? AND enabled = ?", tenantID, true).First(&comp)
+	if comp.ComponentAppID == "" {
+		database.DB.Where("enabled = ?", true).Order("id desc").First(&comp)
+	}
+
+	err := service.DefaultWxMiniService.DeleteTemplate(c.Request.Context(), comp.ComponentAppID, templateID)
+	if err != nil {
+		Fail(c, http.StatusInternalServerError, "删除模板失败: "+err.Error())
+		return
+	}
+
+	Ok(c, gin.H{"message": "模板已删除"})
 }

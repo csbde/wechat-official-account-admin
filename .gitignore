@@ -10,3 +10,9 @@ woaa.pid
 wechat-official-account-admin-fe/node_modules/
 files/upload-image/*
 files/wx-download-media/*
+
+# 运行时数据（SQLite 数据库 / 上传文件 / 临时产物）
+data/
+files/upload-image/
+files/wx-download-media/
+*.pid

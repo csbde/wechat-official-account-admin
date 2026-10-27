@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"net/http"
 
-		"github.com/anchel/wechat-official-account-admin/internal/database"
+	"github.com/anchel/wechat-official-account-admin/internal/database"
 	"github.com/anchel/wechat-official-account-admin/internal/model"
+	"github.com/anchel/wechat-official-account-admin/internal/service"
 	"github.com/gin-gonic/gin"
 )
 
@@ -199,4 +200,68 @@ func (h *AccountHandler) SetDefault(c *gin.Context) {
 	database.DB.Model(&model.WxAccount{}).Where("tenant_id = ?", tenantID).Update("is_default", false)
 	database.DB.Model(&model.WxAccount{}).Where("id = ? AND tenant_id = ?", id, tenantID).Update("is_default", true)
 	Ok(c, gin.H{"status": "default_updated"})
+}
+
+// GetAuthorizerDetail 获取微信官方权威授权账号全量详情 (api_get_authorizer_info)
+func (h *AccountHandler) GetAuthorizerDetail(c *gin.Context) {
+	tenantID := GetTenantID(c)
+	id := c.Param("id")
+
+	var account model.WxAccount
+	query := database.DB.Where("id = ?", id)
+	if !IsSuperAdmin(c) {
+		query = query.Where("tenant_id = ?", tenantID)
+	}
+	if err := query.First(&account).Error; err != nil {
+		Fail(c, http.StatusNotFound, "公众号不存在或无权查看")
+		return
+	}
+
+	// 1. 若是开放平台第三方代管授权账号
+	if account.AccountType == "authorized" && account.ComponentAppID != "" {
+		detail, err := service.DefaultWxOpenService.GetAuthorizerInfo(c.Request.Context(), account.ComponentAppID, account.AppID)
+		if err != nil {
+			Fail(c, http.StatusInternalServerError, "获取微信官方档案失败: "+err.Error())
+			return
+		}
+
+		// 自动增量补充落库 (更新微信官方返回的主体全称、原始ID、头像等)
+		info := detail.AuthorizerInfo
+		updates := map[string]interface{}{}
+		if info.NickName != "" && account.Name != info.NickName {
+			updates["name"] = info.NickName
+		}
+		if info.UserName != "" && account.OriginalID != info.UserName {
+			updates["original_id"] = info.UserName
+		}
+		if info.HeadImg != "" && account.AvatarURL != info.HeadImg {
+			updates["avatar_url"] = info.HeadImg
+		}
+		if info.QRCodeURL != "" {
+			updates["qrcode_url"] = info.QRCodeURL
+		}
+		if info.Signature != "" && account.Description == "" {
+			updates["description"] = info.Signature
+		}
+		if len(updates) > 0 {
+			database.DB.Model(&account).Updates(updates)
+		}
+
+		Ok(c, gin.H{
+			"account":         account,
+			"authorizer_info": detail.AuthorizerInfo,
+			"func_info":       detail.AuthorizationInfo.FuncInfo,
+		})
+		return
+	}
+
+	// 2. 普通直连公众号，返回已有完整信息
+	Ok(c, gin.H{
+		"account": account,
+		"authorizer_info": gin.H{
+			"nick_name": account.Name,
+			"user_name": account.OriginalID,
+			"signature": account.Description,
+		},
+	})
 }

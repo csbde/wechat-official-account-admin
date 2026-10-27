@@ -190,3 +190,253 @@ func (s *WxMiniService) Code2Session(ctx context.Context, componentAppID, miniAp
 
 	return res, nil
 }
+
+// LinkedMiniProgramItem 公众号关联的小程序详情
+type LinkedMiniProgramItem struct {
+	Status              int    `json:"status"`   // 1: 已关联, 2: 待小程序管理员确认, 3: 小程序管理员拒绝, 12: 待公众号管理员确认
+	Username            string `json:"username"` // 小程序原始 ID (gh_xxx)
+	Nickname            string `json:"nickname"` // 小程序昵称
+	Selected            int    `json:"selected"` // 是否在公众号资料页展示 0:否, 1:是
+	NearbyDisplayStatus int    `json:"nearby_display_status"`
+	AppID               string `json:"appid"`
+	HeadImgURL          string `json:"headimg_url"`
+	Email               string `json:"email"`
+	CopyVerifyStatus    int    `json:"copy_verify_status"`
+}
+
+// GetLinkedMiniPrograms 获取公众号关联的小程序列表 (cgi-bin/wxopen/wxamplinkget)
+func (s *WxMiniService) GetLinkedMiniPrograms(ctx context.Context, officialAppID string) ([]LinkedMiniProgramItem, error) {
+	wxClient, err := NewWxClient(officialAppID)
+	if err != nil {
+		return nil, err
+	}
+	token, err := wxClient.GetAccessToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	apiURL := fmt.Sprintf("https://api.weixin.qq.com/cgi-bin/wxopen/wxamplinkget?access_token=%s", token)
+	resp, err := s.http.R().SetContext(ctx).SetBody(map[string]interface{}{}).Post(apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("请求关联小程序列表网络错误: %w", err)
+	}
+
+	var res struct {
+		Errcode int    `json:"errcode"`
+		Errmsg  string `json:"errmsg"`
+		WxOpens struct {
+			Items []LinkedMiniProgramItem `json:"items"`
+		} `json:"wxopens"`
+	}
+	if err := json.Unmarshal(resp.Body(), &res); err != nil {
+		return nil, fmt.Errorf("解析微信关联小程序响应失败: %w", err)
+	}
+	if res.Errcode != 0 {
+		return nil, fmt.Errorf("[%d] %s", res.Errcode, res.Errmsg)
+	}
+
+	return res.WxOpens.Items, nil
+}
+
+// LinkMiniProgram 为公众号关联小程序 (cgi-bin/wxopen/wxamplink)
+func (s *WxMiniService) LinkMiniProgram(ctx context.Context, officialAppID, miniAppID string, notifyUsers, showProfile int) error {
+	wxClient, err := NewWxClient(officialAppID)
+	if err != nil {
+		return err
+	}
+	token, err := wxClient.GetAccessToken(ctx)
+	if err != nil {
+		return err
+	}
+
+	apiURL := fmt.Sprintf("https://api.weixin.qq.com/cgi-bin/wxopen/wxamplink?access_token=%s", token)
+	resp, err := s.http.R().SetContext(ctx).SetBody(map[string]interface{}{
+		"appid":        miniAppID,
+		"notify_users": notifyUsers, // 0:不发, 1:发
+		"show_profile": showProfile, // 0:不在资料页展示, 1:展示
+	}).Post(apiURL)
+	if err != nil {
+		return err
+	}
+
+	var res struct {
+		Errcode int    `json:"errcode"`
+		Errmsg  string `json:"errmsg"`
+	}
+	if err := json.Unmarshal(resp.Body(), &res); err != nil {
+		return err
+	}
+	if res.Errcode != 0 {
+		return fmt.Errorf("[%d] %s", res.Errcode, res.Errmsg)
+	}
+
+	return nil
+}
+
+// UnlinkMiniProgram 解绑小程序 (cgi-bin/wxopen/wxampunlink)
+func (s *WxMiniService) UnlinkMiniProgram(ctx context.Context, officialAppID, miniAppID string) error {
+	wxClient, err := NewWxClient(officialAppID)
+	if err != nil {
+		return err
+	}
+	token, err := wxClient.GetAccessToken(ctx)
+	if err != nil {
+		return err
+	}
+
+	apiURL := fmt.Sprintf("https://api.weixin.qq.com/cgi-bin/wxopen/wxampunlink?access_token=%s", token)
+	resp, err := s.http.R().SetContext(ctx).SetBody(map[string]interface{}{
+		"appid": miniAppID,
+	}).Post(apiURL)
+	if err != nil {
+		return err
+	}
+
+	var res struct {
+		Errcode int    `json:"errcode"`
+		Errmsg  string `json:"errmsg"`
+	}
+	if err := json.Unmarshal(resp.Body(), &res); err != nil {
+		return err
+	}
+	if res.Errcode != 0 {
+		return fmt.Errorf("[%d] %s", res.Errcode, res.Errmsg)
+	}
+
+	return nil
+}
+
+// TemplateDraftItem 小程序代码草稿箱条目
+type TemplateDraftItem struct {
+	DraftID      int    `json:"draft_id"`
+	UserVersion  string `json:"user_version"`
+	UserDesc     string `json:"user_desc"`
+	Developer    string `json:"developer"`
+	CreateTime   int64  `json:"create_time"`
+	TemplateType int    `json:"template_type"`
+}
+
+// TemplateListItem 小程序代码模板库条目
+type TemplateListItem struct {
+	TemplateID   int    `json:"template_id"`
+	UserVersion  string `json:"user_version"`
+	UserDesc     string `json:"user_desc"`
+	CreateTime   int64  `json:"create_time"`
+	TemplateType int    `json:"template_type"`
+	Developer    string `json:"developer,omitempty"`
+}
+
+// GetTemplateDraftList 获取代码草稿箱列表 (wxa/gettemplatedraftlist)
+func (s *WxMiniService) GetTemplateDraftList(ctx context.Context, componentAppID string) ([]TemplateDraftItem, error) {
+	compToken, err := DefaultWxOpenService.GetComponentAccessToken(ctx, componentAppID)
+	if err != nil {
+		return nil, err
+	}
+
+	apiURL := fmt.Sprintf("https://api.weixin.qq.com/wxa/gettemplatedraftlist?access_token=%s", compToken)
+	resp, err := s.http.R().SetContext(ctx).Get(apiURL)
+	if err != nil {
+		return nil, err
+	}
+
+	var res struct {
+		DraftList []TemplateDraftItem `json:"draft_list"`
+		Errcode   int                 `json:"errcode"`
+		Errmsg    string              `json:"errmsg"`
+	}
+	if err := json.Unmarshal(resp.Body(), &res); err != nil {
+		return nil, err
+	}
+	if res.Errcode != 0 {
+		return nil, fmt.Errorf("[%d] %s", res.Errcode, res.Errmsg)
+	}
+
+	return res.DraftList, nil
+}
+
+// AddDraftToTemplate 将草稿箱添加到模板库 (wxa/addtotemplate)
+func (s *WxMiniService) AddDraftToTemplate(ctx context.Context, componentAppID string, draftID, templateType int) error {
+	compToken, err := DefaultWxOpenService.GetComponentAccessToken(ctx, componentAppID)
+	if err != nil {
+		return err
+	}
+
+	apiURL := fmt.Sprintf("https://api.weixin.qq.com/wxa/addtotemplate?access_token=%s", compToken)
+	resp, err := s.http.R().SetContext(ctx).SetBody(map[string]interface{}{
+		"draft_id":      draftID,
+		"template_type": templateType,
+	}).Post(apiURL)
+	if err != nil {
+		return err
+	}
+
+	var res struct {
+		Errcode int    `json:"errcode"`
+		Errmsg  string `json:"errmsg"`
+	}
+	if err := json.Unmarshal(resp.Body(), &res); err != nil {
+		return err
+	}
+	if res.Errcode != 0 {
+		return fmt.Errorf("[%d] %s", res.Errcode, res.Errmsg)
+	}
+
+	return nil
+}
+
+// GetTemplateList 获取模板库列表 (wxa/gettemplatelist)
+func (s *WxMiniService) GetTemplateList(ctx context.Context, componentAppID string, templateType int) ([]TemplateListItem, error) {
+	compToken, err := DefaultWxOpenService.GetComponentAccessToken(ctx, componentAppID)
+	if err != nil {
+		return nil, err
+	}
+
+	apiURL := fmt.Sprintf("https://api.weixin.qq.com/wxa/gettemplatelist?access_token=%s&template_type=%d", compToken, templateType)
+	resp, err := s.http.R().SetContext(ctx).Get(apiURL)
+	if err != nil {
+		return nil, err
+	}
+
+	var res struct {
+		TemplateList []TemplateListItem `json:"template_list"`
+		Errcode      int                `json:"errcode"`
+		Errmsg       string             `json:"errmsg"`
+	}
+	if err := json.Unmarshal(resp.Body(), &res); err != nil {
+		return nil, err
+	}
+	if res.Errcode != 0 {
+		return nil, fmt.Errorf("[%d] %s", res.Errcode, res.Errmsg)
+	}
+
+	return res.TemplateList, nil
+}
+
+// DeleteTemplate 删除指定模板 (wxa/deltemplate)
+func (s *WxMiniService) DeleteTemplate(ctx context.Context, componentAppID string, templateID int) error {
+	compToken, err := DefaultWxOpenService.GetComponentAccessToken(ctx, componentAppID)
+	if err != nil {
+		return err
+	}
+
+	apiURL := fmt.Sprintf("https://api.weixin.qq.com/wxa/deltemplate?access_token=%s", compToken)
+	resp, err := s.http.R().SetContext(ctx).SetBody(map[string]interface{}{
+		"template_id": templateID,
+	}).Post(apiURL)
+	if err != nil {
+		return err
+	}
+
+	var res struct {
+		Errcode int    `json:"errcode"`
+		Errmsg  string `json:"errmsg"`
+	}
+	if err := json.Unmarshal(resp.Body(), &res); err != nil {
+		return err
+	}
+	if res.Errcode != 0 {
+		return fmt.Errorf("[%d] %s", res.Errcode, res.Errmsg)
+	}
+
+	return nil
+}
