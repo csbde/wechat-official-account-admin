@@ -46,15 +46,17 @@ func (h *MenuHandler) Save(c *gin.Context) {
 	err := database.DB.Where("app_id = ? AND tenant_id = ? AND menu_type = 'normal'", appid, tenantID).First(&menu).Error
 	if err != nil {
 		menu = model.WxMenu{
-			TenantID: tenantID,
-			AppID:    appid,
-			MenuType: "normal",
-			Name:     "默认菜单",
-			MenuData: req.MenuData,
+			TenantID:  tenantID,
+			AppID:     appid,
+			MenuType:  "normal",
+			Name:      "默认菜单",
+			MenuData:  req.MenuData,
+			Published: false, // 新建草稿，未发布
 		}
 		database.DB.Create(&menu)
 	} else {
 		menu.MenuData = req.MenuData
+		menu.Published = false // 管理员保存了新草稿，明确重置为未发布状态！
 		database.DB.Save(&menu)
 	}
 

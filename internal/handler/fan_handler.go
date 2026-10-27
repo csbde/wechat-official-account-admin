@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -42,14 +43,41 @@ func (h *FanHandler) List(c *gin.Context) {
 	Page(c, list, total, page, pageSize)
 }
 
-// Sync 异步同步微信粉丝
+// Sync 触发全量粉丝同步 (支持 Asynq 队列与内置后台协程双引擎)
 func (h *FanHandler) Sync(c *gin.Context) {
 	appid := GetAppID(c)
-	if err := queue.EnqueueSyncFans(appid); err != nil {
-		Fail(c, http.StatusInternalServerError, "分发异步同步任务失败: "+err.Error())
+	tenantID := GetTenantID(c)
+
+	// 检查当前是否已经在运行中
+	status := service.DefaultFanSyncManager.GetStatus(appid)
+	if status.Status == "running" {
+		Ok(c, gin.H{
+			"status":  "running",
+			"message": "同步任务已经在后台执行中，请查看上方进度条",
+		})
 		return
 	}
-	Ok(c, gin.H{"status": "queued", "message": "微信粉丝同步任务已派发至后台队列"})
+
+	// 1. 尝试派发到 Asynq 分布式队列
+	err := queue.EnqueueSyncFans(tenantID, appid)
+	if err != nil {
+		// 2. 若 Redis/Asynq 未启用，自动无缝降级为内置后台异步协程处理 (单机 SQLite 模式)
+		go func() {
+			_ = service.DefaultFanSyncManager.DoSyncFansTask(context.Background(), tenantID, appid)
+		}()
+	}
+
+	Ok(c, gin.H{
+		"status":  "started",
+		"message": "微信粉丝同步任务已成功启动，正在后台全力拉取中",
+	})
+}
+
+// GetSyncStatus 获取当前公众号的粉丝同步执行进度
+func (h *FanHandler) GetSyncStatus(c *gin.Context) {
+	appid := GetAppID(c)
+	status := service.DefaultFanSyncManager.GetStatus(appid)
+	Ok(c, status)
 }
 
 // UpdateRemark 修改粉丝备注 (租户隔离)

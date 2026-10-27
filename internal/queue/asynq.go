@@ -7,6 +7,7 @@ import (
 
 	"github.com/anchel/wechat-official-account-admin/config"
 	"github.com/anchel/wechat-official-account-admin/internal/logger"
+	"github.com/anchel/wechat-official-account-admin/internal/service"
 	"github.com/hibiken/asynq"
 	"go.uber.org/zap"
 )
@@ -21,16 +22,15 @@ var Client *asynq.Client
 var Server *asynq.Server
 
 type SyncFansPayload struct {
-	AppID string `json:"appid"`
-}
-
-type DownloadMaterialPayload struct {
-	AppID   string `json:"appid"`
-	MediaID string `json:"media_id"`
-	Type    string `json:"type"`
+	TenantID uint   `json:"tenant_id"`
+	AppID    string `json:"appid"`
 }
 
 func Init(cfg *config.Config) (*asynq.Client, *asynq.Server, error) {
+	if cfg.Redis.Addr == "" {
+		return nil, nil, fmt.Errorf("redis addr is empty")
+	}
+
 	redisOpt := asynq.RedisClientOpt{
 		Addr:     cfg.Redis.Addr,
 		Password: cfg.Redis.Password,
@@ -57,11 +57,12 @@ func Init(cfg *config.Config) (*asynq.Client, *asynq.Server, error) {
 	return Client, Server, nil
 }
 
-func EnqueueSyncFans(appid string) error {
+// EnqueueSyncFans 派发异步任务
+func EnqueueSyncFans(tenantID uint, appid string) error {
 	if Client == nil {
-		return fmt.Errorf("asynq client is nil")
+		return fmt.Errorf("asynq client is nil (redis not configured)")
 	}
-	payload, _ := json.Marshal(SyncFansPayload{AppID: appid})
+	payload, _ := json.Marshal(SyncFansPayload{TenantID: tenantID, AppID: appid})
 	task := asynq.NewTask(TypeSyncFans, payload)
 	info, err := Client.Enqueue(task, asynq.Queue("default"), asynq.MaxRetry(3))
 	if err != nil {
@@ -86,8 +87,8 @@ func NewServeMux() *asynq.ServeMux {
 		if err := json.Unmarshal(t.Payload(), &p); err != nil {
 			return err
 		}
-		logger.Info("Processing sync fans background task", zap.String("appid", p.AppID))
-		return nil
+		logger.Info("Processing sync fans Asynq task", zap.String("appid", p.AppID))
+		return service.DefaultFanSyncManager.DoSyncFansTask(ctx, p.TenantID, p.AppID)
 	})
 	return mux
 }

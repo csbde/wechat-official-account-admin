@@ -118,6 +118,7 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 
 	authHandler := &handler.AuthHandler{}
 	systemHandler := &handler.SystemHandler{}
+	qrcodeHandler := &handler.QrcodeHandler{}
 
 	// 公开接口 (无需认证)
 	authGroup := api.Group("/auth")
@@ -129,6 +130,7 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 	}
 	api.GET("/system/public-ip", systemHandler.PublicIP)
 	api.GET("/system/health", systemHandler.HealthCheck)
+	api.GET("/qrcode/:id/image", qrcodeHandler.GetImage)
 
 	// 微信扫码授权重定向回调端点 (由微信浏览器重定向直连访问，无需 JWT Header)
 	api.GET("/open/auth-callback", openHandler.AuthCallback)
@@ -208,6 +210,7 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 			fanHandler := &handler.FanHandler{}
 			tenant.GET("/fans", fanHandler.List)
 			tenant.POST("/fans/sync", fanHandler.Sync)
+			tenant.GET("/fans/sync-status", fanHandler.GetSyncStatus)
 			tenant.POST("/fans/remark", fanHandler.UpdateRemark)
 			tenant.GET("/fans/tags", fanHandler.GetTags)
 			tenant.POST("/fans/tags", fanHandler.CreateTag)

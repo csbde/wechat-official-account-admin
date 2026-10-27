@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
+	"net/url"
 	"fmt"
 	"sort"
 	"strings"
@@ -237,11 +238,11 @@ func (w *WxClient) GetMaterialList(ctx context.Context, mediaType string, offset
 	return res, nil
 }
 
-// CreateQRCode 创建带参二维码
-func (w *WxClient) CreateQRCode(ctx context.Context, qrcodeType string, sceneID int, sceneStr string, expireSeconds int) (ticket, url string, err error) {
+// CreateQRCode 创建带参二维码 (返回 ticket, 图片URL, 微信扫码链接, 错误)
+func (w *WxClient) CreateQRCode(ctx context.Context, qrcodeType string, sceneID int, sceneStr string, expireSeconds int) (ticket, imageURL, scanURL string, err error) {
 	token, err := w.GetAccessToken(ctx)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	apiURL := fmt.Sprintf("https://api.weixin.qq.com/cgi-bin/qrcode/create?access_token=%s", token)
 
@@ -249,7 +250,8 @@ func (w *WxClient) CreateQRCode(ctx context.Context, qrcodeType string, sceneID 
 	actionInfo := map[string]interface{}{}
 
 	if qrcodeType == "temp" {
-		if expireSeconds <= 0 {
+		// 微信官方限制：临时二维码过期时间最长不能超过 30 天 (2592000 秒)
+		if expireSeconds <= 0 || expireSeconds > 2592000 {
 			expireSeconds = 2592000
 		}
 		body["expire_seconds"] = expireSeconds
@@ -273,24 +275,27 @@ func (w *WxClient) CreateQRCode(ctx context.Context, qrcodeType string, sceneID 
 
 	resp, err := w.http.R().SetContext(ctx).SetBody(body).Post(apiURL)
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 
 	var res struct {
 		Ticket        string `json:"ticket"`
 		ExpireSeconds int    `json:"expire_seconds"`
-		URL           string `json:"url"`
+		URL           string `json:"url"` // 微信扫码内容
 		Errcode       int    `json:"errcode"`
 		Errmsg        string `json:"errmsg"`
 	}
 	if err := json.Unmarshal(resp.Body(), &res); err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	if res.Errcode != 0 {
-		return "", "", fmt.Errorf("create qrcode error: [%d] %s", res.Errcode, res.Errmsg)
+		return "", "", "", fmt.Errorf("[%d] %s", res.Errcode, res.Errmsg)
 	}
 
-	return res.Ticket, res.URL, nil
+	// 微信官方要求：展示二维码图片必须调用 showqrcode?ticket=xxx
+	imgURL := fmt.Sprintf("https://mp.weixin.qq.com/cgi-bin/showqrcode?ticket=%s", url.QueryEscape(res.Ticket))
+
+	return res.Ticket, imgURL, res.URL, nil
 }
 
 // GetUserList 获取关注者列表
@@ -355,4 +360,64 @@ func (w *WxClient) UpdateUserRemark(ctx context.Context, openid, remark string) 
 		return fmt.Errorf("update remark failed: [%d] %s", res.Errcode, res.Errmsg)
 	}
 	return nil
+}
+
+type WxUserDetail struct {
+	Subscribe      int    `json:"subscribe"`
+	OpenID         string `json:"openid"`
+	Nickname       string `json:"nickname"`
+	Sex            int    `json:"sex"`
+	Language       string `json:"language"`
+	City           string `json:"city"`
+	Province       string `json:"province"`
+	Country        string `json:"country"`
+	HeadImgURL     string `json:"headimgurl"`
+	SubscribeTime  int64  `json:"subscribe_time"`
+	UnionID        string `json:"unionid"`
+	Remark         string `json:"remark"`
+	GroupID        int    `json:"groupid"`
+	TagIDList      []int  `json:"tagid_list"`
+	SubscribeScene string `json:"subscribe_scene"`
+}
+
+// BatchGetUserInfo 批量获取粉丝详细资料 (每批最多100个)
+func (w *WxClient) BatchGetUserInfo(ctx context.Context, openIDs []string) ([]WxUserDetail, error) {
+	if len(openIDs) == 0 {
+		return nil, nil
+	}
+	token, err := w.GetAccessToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	userListParam := make([]map[string]string, len(openIDs))
+	for i, oid := range openIDs {
+		userListParam[i] = map[string]string{
+			"openid": oid,
+			"lang":   "zh_CN",
+		}
+	}
+
+	url := fmt.Sprintf("https://api.weixin.qq.com/cgi-bin/user/info/batchget?access_token=%s", token)
+	resp, err := w.http.R().SetContext(ctx).SetBody(map[string]interface{}{
+		"user_list": userListParam,
+	}).Post(url)
+
+	if err != nil {
+		return nil, err
+	}
+
+	var res struct {
+		UserInfoList []WxUserDetail `json:"user_info_list"`
+		Errcode      int            `json:"errcode"`
+		Errmsg       string         `json:"errmsg"`
+	}
+	if err := json.Unmarshal(resp.Body(), &res); err != nil {
+		return nil, err
+	}
+	if res.Errcode != 0 {
+		return nil, fmt.Errorf("batchget user info failed: [%d] %s", res.Errcode, res.Errmsg)
+	}
+
+	return res.UserInfoList, nil
 }

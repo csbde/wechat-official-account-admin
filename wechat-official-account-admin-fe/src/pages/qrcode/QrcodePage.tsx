@@ -50,6 +50,9 @@ export const QrcodePage: React.FC = () => {
       setSceneStr('')
       setRemark('')
     },
+    onError: (err: any) => {
+      toast.error('生成失败: ' + (err.message || '微信接口报错'))
+    },
   })
 
   const copyToClipboard = (text: string, label: string) => {
@@ -63,12 +66,28 @@ export const QrcodePage: React.FC = () => {
       return
     }
 
+    let days = expireDays
+    if (days <= 0 || days > 30) {
+      days = 30
+    }
+
     createMutation.mutate({
       qrcode_type: qrcodeType,
       scene_str: sceneStr.trim(),
-      expire_seconds: qrcodeType === 'temp' ? expireDays * 86400 : 0,
+      expire_seconds: qrcodeType === 'temp' ? days * 86400 : 0,
       remark: remark.trim(),
     })
+  }
+
+  // 下载二维码图片
+  const handleDownload = (item: any) => {
+    const link = document.createElement('a')
+    link.href = `/api/qrcode/${item.id}/image`
+    link.download = `qrcode_${item.scene_str || item.id}.png`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    toast.success('已开始下载二维码图片')
   }
 
   return (
@@ -93,17 +112,17 @@ export const QrcodePage: React.FC = () => {
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {qrcodes.list.map((item: any) => {
             const isTemp = item.qrcode_type === 'temp'
+            const imgSrc = `/api/qrcode/${item.id}/image`
+
             return (
               <Card key={item.id} className="overflow-hidden group hover:shadow-md transition-shadow">
                 <div className="p-6 bg-muted/40 flex flex-col items-center justify-center border-b">
-                  <div className="h-44 w-44 bg-white p-2 rounded-xl shadow-sm border flex items-center justify-center">
+                  <div className="h-44 w-44 bg-white p-2 rounded-xl shadow-sm border flex items-center justify-center overflow-hidden">
                     <img
-                      src={item.url}
+                      src={imgSrc}
+                      referrerPolicy="no-referrer"
                       alt="二维码"
                       className="h-full w-full object-contain"
-                      onError={(e) => {
-                        ;(e.target as HTMLElement).style.display = 'none'
-                      }}
                     />
                   </div>
                   <div className="mt-3 flex items-center gap-1.5">
@@ -138,22 +157,20 @@ export const QrcodePage: React.FC = () => {
                     <span className="text-muted-foreground">{formatDate(item.created_at)}</span>
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={() => copyToClipboard(item.url, '二维码链接')}
+                        onClick={() => handleDownload(item)}
+                        className="text-primary hover:underline flex items-center gap-0.5 font-medium"
+                        title="下载二维码图片到本地"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        <span>下载</span>
+                      </button>
+                      <button
+                        onClick={() => copyToClipboard(window.location.origin + imgSrc, '二维码图片链接')}
                         className="text-muted-foreground hover:text-foreground inline-flex items-center gap-0.5"
-                        title="复制图片链接"
+                        title="复制图片直链"
                       >
                         <Copy className="h-3.5 w-3.5" />
                       </button>
-                      <a
-                        href={item.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-primary hover:underline flex items-center gap-0.5 font-medium"
-                        title="查看大图"
-                      >
-                        <ExternalLink className="h-3.5 w-3.5" />
-                        <span>大图</span>
-                      </a>
                     </div>
                   </div>
                 </CardContent>
@@ -213,13 +230,13 @@ export const QrcodePage: React.FC = () => {
 
             {qrcodeType === 'temp' && (
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold">有效天数 (1 - 30天)</label>
+                <label className="text-xs font-semibold">有效天数 (1 - 30天，微信官方最大支持30天)</label>
                 <Input
                   type="number"
                   min={1}
                   max={30}
                   value={expireDays}
-                  onChange={(e) => setExpireDays(parseInt(e.target.value) || 30)}
+                  onChange={(e) => setExpireDays(Math.min(30, Math.max(1, parseInt(e.target.value) || 30)))}
                 />
               </div>
             )}

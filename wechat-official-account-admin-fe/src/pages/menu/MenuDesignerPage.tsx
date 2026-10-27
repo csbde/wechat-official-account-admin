@@ -251,11 +251,17 @@ export const MenuDesignerPage: React.FC = () => {
         <div>
           <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">
             <span>微信自定义菜单设计器</span>
-            {menuData?.published && activeTab === 'normal' && (
-              <Badge variant="success" className="text-xs gap-1">
-                <CheckCircle2 className="h-3 w-3" />
-                已发布 ({formatDate(menuData.published_at)})
-              </Badge>
+            {activeTab === 'normal' && (
+              menuData?.published ? (
+                <Badge variant="success" className="text-xs gap-1 py-0.5">
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  <span>已发布至微信 ({formatDate(menuData.published_at)})</span>
+                </Badge>
+              ) : (
+                <Badge variant="secondary" className="text-xs gap-1 py-0.5 border border-amber-500/40 text-amber-600 dark:text-amber-400 bg-amber-500/10 font-medium">
+                  <span>草稿待发布 (未同步至微信)</span>
+                </Badge>
+              )
             )}
           </h2>
           <p className="text-sm text-muted-foreground">

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   useReactTable,
@@ -9,6 +9,7 @@ import {
 import { api, PageResult } from '@/lib/api'
 import { useAppStore } from '@/stores/app'
 import { Button } from '@/components/ui/button'
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -34,6 +35,9 @@ import {
   Edit2,
   Trash2,
   UserCheck,
+  CheckCircle2,
+  AlertCircle,
+  Activity,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatDate } from '@/lib/utils'
@@ -56,6 +60,9 @@ export const FansPage: React.FC = () => {
   const [tagModalOpen, setTagModalOpen] = useState(false)
   const [newTagName, setNewTagName] = useState('')
 
+  // 是否正在轮询同步进度
+  const [isSyncing, setIsSyncing] = useState(false)
+
   // 获取粉丝列表
   const { data: fansResult, isLoading } = useQuery<PageResult<any>>({
     queryKey: ['fans', currentApp?.appid, page, keyword, selectedTag],
@@ -71,11 +78,38 @@ export const FansPage: React.FC = () => {
     enabled: !!currentApp,
   })
 
+  // 轮询同步任务进度
+  const { data: syncStatus, refetch: refetchSyncStatus } = useQuery<any>({
+    queryKey: ['fans-sync-status', currentApp?.appid],
+    queryFn: () => api.get('/api/fans/sync-status'),
+    enabled: !!currentApp,
+    refetchInterval: isSyncing ? 1500 : false,
+  })
+
+  useEffect(() => {
+    if (syncStatus?.status === 'running') {
+      setIsSyncing(true)
+    } else if (syncStatus?.status === 'completed' && isSyncing) {
+      setIsSyncing(false)
+      toast.success(syncStatus.message || '粉丝数据已同步完成！')
+      queryClient.invalidateQueries({ queryKey: ['fans'] })
+      queryClient.invalidateQueries({ queryKey: ['fans-tags'] })
+    } else if (syncStatus?.status === 'failed' && isSyncing) {
+      setIsSyncing(false)
+      toast.error('粉丝同步失败: ' + (syncStatus.error || syncStatus.message))
+    }
+  }, [syncStatus, isSyncing, queryClient])
+
   // 触发后台同步
   const syncMutation = useMutation({
     mutationFn: () => api.post('/api/fans/sync'),
     onSuccess: (data: any) => {
-      toast.success(data?.message || '微信粉丝同步任务已派发')
+      setIsSyncing(true)
+      toast.info(data?.message || '同步任务已启动，正在后台拉取')
+      refetchSyncStatus()
+    },
+    onError: (err: any) => {
+      toast.error('触发同步失败: ' + (err.message || '网络错误'))
     },
   })
 
@@ -165,7 +199,12 @@ export const FansPage: React.FC = () => {
           <div className="flex items-center gap-3">
             <div className="h-9 w-9 rounded-full bg-muted overflow-hidden flex items-center justify-center font-bold text-xs text-muted-foreground shrink-0 border">
               {row.original.headimgurl ? (
-                <img src={row.original.headimgurl} alt="" className="h-full w-full object-cover" />
+                <img
+                  src={row.original.headimgurl}
+                  referrerPolicy="no-referrer"
+                  alt=""
+                  className="h-full w-full object-cover"
+                />
               ) : (
                 row.original.nickname?.slice(0, 1) || 'U'
               )}
@@ -261,7 +300,7 @@ export const FansPage: React.FC = () => {
         <div>
           <h2 className="text-2xl font-bold tracking-tight">粉丝与标签管理</h2>
           <p className="text-sm text-muted-foreground">
-            粉丝全量表格管理、多维搜索、设置备注与批量标签操作
+            微信粉丝全量同步与管理，支持实时同步进度监控、多维搜索与标签批量操作
           </p>
         </div>
 
@@ -272,14 +311,75 @@ export const FansPage: React.FC = () => {
           </Button>
           <Button
             onClick={() => syncMutation.mutate()}
-            disabled={syncMutation.isPending}
+            disabled={isSyncing || syncMutation.isPending}
             className="gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
           >
-            <RefreshCw className={`h-4 w-4 ${syncMutation.isPending ? 'animate-spin' : ''}`} />
-            <span>异步同步粉丝</span>
+            <RefreshCw className={`h-4 w-4 ${isSyncing || syncMutation.isPending ? 'animate-spin' : ''}`} />
+            <span>{isSyncing ? '正在同步粉丝中...' : '异步同步粉丝'}</span>
           </Button>
         </div>
       </div>
+
+      {/* 实时同步执行情况与进度监控卡片 (重点功能！) */}
+      {syncStatus && syncStatus.status !== 'idle' && (
+        <Card className={`border-2 transition-all ${
+          syncStatus.status === 'running'
+            ? 'border-emerald-500 bg-emerald-500/5'
+            : syncStatus.status === 'failed'
+            ? 'border-destructive bg-destructive/5'
+            : 'border-border'
+        }`}>
+          <CardContent className="p-4 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                {syncStatus.status === 'running' ? (
+                  <RefreshCw className="h-4 w-4 text-emerald-600 animate-spin" />
+                ) : syncStatus.status === 'completed' ? (
+                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                ) : (
+                  <AlertCircle className="h-4 w-4 text-destructive" />
+                )}
+                <span className="font-semibold text-sm text-foreground">
+                  {syncStatus.status === 'running'
+                    ? '微信粉丝全量同步正在执行中...'
+                    : syncStatus.status === 'completed'
+                    ? '粉丝同步已顺利完成'
+                    : '粉丝同步遇到错误'}
+                </span>
+                <Badge
+                  variant={syncStatus.status === 'running' ? 'default' : syncStatus.status === 'completed' ? 'success' : 'destructive'}
+                  className="text-[10px]"
+                >
+                  {syncStatus.status.toUpperCase()}
+                </Badge>
+              </div>
+
+              {syncStatus.total_fans > 0 && (
+                <span className="font-mono text-xs font-semibold text-primary">
+                  {syncStatus.synced_fans} / {syncStatus.total_fans} 位 ({syncStatus.percent}%)
+                </span>
+              )}
+            </div>
+
+            {/* 动态进度条 */}
+            <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
+              <div
+                className={`h-full transition-all duration-300 rounded-full ${
+                  syncStatus.status === 'failed' ? 'bg-destructive' : 'bg-emerald-600'
+                }`}
+                style={{ width: `${Math.max(5, syncStatus.percent || 0)}%` }}
+              />
+            </div>
+
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>{syncStatus.message}</span>
+              {syncStatus.start_time && (
+                <span>开始于: {formatDate(syncStatus.start_time)}</span>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* 搜索与筛选栏 */}
       <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-card rounded-xl border">
@@ -464,7 +564,7 @@ export const FansPage: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      {/* 标签管理弹窗 (支持新增与删除) */}
+      {/* 标签管理弹窗 */}
       <Dialog open={tagModalOpen} onOpenChange={setTagModalOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
