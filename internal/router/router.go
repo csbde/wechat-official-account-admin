@@ -130,6 +130,9 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 	api.GET("/system/public-ip", systemHandler.PublicIP)
 	api.GET("/system/health", systemHandler.HealthCheck)
 
+	// 微信扫码授权重定向回调端点 (由微信浏览器重定向直连访问，无需 JWT Header)
+	api.GET("/open/auth-callback", openHandler.AuthCallback)
+
 	// WXGate 网关监控与缓存管理
 	api.GET("/wxgate/stats", gateProxy.GetGateStats)
 	api.DELETE("/wxgate/cache/:app_id", gateProxy.ClearAppCache)
@@ -147,7 +150,6 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 		protected.GET("/open/component", openHandler.GetComponent)
 		protected.POST("/open/component", openHandler.SaveComponent)
 		protected.GET("/open/auth-url", openHandler.GetAuthURL)
-		protected.GET("/open/auth-callback", openHandler.AuthCallback)
 		protected.POST("/open/request-ticket", openHandler.RequestPushTicket)
 		protected.POST("/open/manual-ticket", openHandler.ManualSetTicket)
 

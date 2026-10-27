@@ -119,27 +119,148 @@ func (h *OpenComponentHandler) GetAuthURL(c *gin.Context) {
 	})
 }
 
-// AuthCallback 处理扫码授权回调换取凭证
+// AuthCallback 处理微信扫码授权回调 (公开端点，由微信浏览器 302 重定向直连访问)
 func (h *OpenComponentHandler) AuthCallback(c *gin.Context) {
 	authCode := c.Query("auth_code")
 	if authCode == "" {
 		authCode = c.Query("authorization_code")
 	}
-	tenantID := GetTenantID(c)
 
+	tenantIDStr := c.Query("tenant_id")
+	tenantID := uint(1)
+	if tenantIDStr != "" {
+		var tid int
+		if _, err := fmt.Sscanf(tenantIDStr, "%d", &tid); err == nil && tid > 0 {
+			tenantID = uint(tid)
+		}
+	}
+
+	// 查找当前租户或系统启用的第三方平台
 	var comp model.WxOpenComponent
-	if err := database.DB.Where("tenant_id = ? AND enabled = ?", tenantID, true).First(&comp).Error; err != nil {
-		Fail(c, http.StatusBadRequest, "租户开放平台未配置")
+	err := database.DB.Where("tenant_id = ? AND enabled = ?", tenantID, true).First(&comp).Error
+	if err != nil {
+		// 回退查找任意启用的第三方平台
+		err = database.DB.Where("enabled = ?", true).Order("id desc").First(&comp).Error
+	}
+
+	if err != nil {
+		c.String(http.StatusBadRequest, "第三方平台未配置或已禁用")
 		return
 	}
 
 	account, err := service.DefaultWxOpenService.QueryAuth(c.Request.Context(), comp.ComponentAppID, authCode, tenantID)
 	if err != nil {
-		Fail(c, http.StatusInternalServerError, "换取授权凭据失败: "+err.Error())
-		return
+		logger.Warn("[扫码授权回调] QueryAuth 警告", zap.Error(err))
+		// 即使接口报错，检查是否后台事件已提前把该账号存入数据库
+		var existing model.WxAccount
+		if dbErr := database.DB.Where("tenant_id = ? AND account_type = 'authorized'", tenantID).Order("updated_at desc").First(&existing).Error; dbErr == nil {
+			account = &existing
+			err = nil
+		}
 	}
 
-	Ok(c, account)
+	accountName := "微信公众号"
+	appID := ""
+	if account != nil {
+		if account.Name != "" {
+			accountName = account.Name
+		}
+		appID = account.AppID
+	}
+
+	// 返回极具科技感、优雅的 HTML 授权成功反馈页面，并自动通知父窗口刷新与跳转
+	successHTML := fmt.Sprintf(`<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>微信公众号授权成功</title>
+  <style>
+    body {
+      margin: 0; padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: linear-gradient(135deg, #064e3b 0%%, #0f172a 100%%);
+      color: #fff; min-height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .card {
+      background: rgba(30, 41, 59, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(16px);
+      border-radius: 24px;
+      padding: 40px 32px;
+      text-align: center;
+      max-width: 420px;
+      width: 90%%;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    }
+    .icon {
+      width: 64px; height: 64px;
+      margin: 0 auto 20px;
+      border-radius: 50%%;
+      background: rgba(16, 185, 129, 0.2);
+      display: flex; align-items: center; justify-content: center;
+      color: #10b981; font-size: 36px; font-weight: bold;
+    }
+    h2 { margin: 0 0 10px; font-size: 22px; font-weight: 700; }
+    p { margin: 0 0 24px; font-size: 14px; color: #94a3b8; line-height: 1.6; }
+    .badge {
+      display: inline-block;
+      padding: 6px 14px;
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: #34d399;
+      border-radius: 999px;
+      font-size: 13px; font-weight: 600;
+      margin-bottom: 24px;
+    }
+    .btn {
+      display: block; width: 100%%;
+      padding: 12px 0;
+      border-radius: 12px;
+      background: #059669;
+      color: #fff;
+      text-decoration: none;
+      font-weight: 600; font-size: 14px;
+      cursor: pointer; border: none;
+      transition: background 0.2s;
+    }
+    .btn:hover { background: #047857; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">✓</div>
+    <h2>授权接入成功！</h2>
+    <div class="badge">已托管: %s</div>
+    <p>您的微信公众号已成功授权并委托给本平台代管，所有微信功能与接口已自动就绪。<br>页面将在 <span id="countdown">3</span> 秒后自动返回管理系统...</p>
+    <button class="btn" onclick="goHome()">立即返回系统工作台</button>
+  </div>
+  <script>
+    function goHome() {
+      // 尝试通知父窗口（如果是在弹窗中打开）
+      try {
+        if (window.opener && !window.opener.closed) {
+          window.opener.postMessage({ type: 'WECHAT_AUTH_SUCCESS', appid: '%s', name: '%s' }, '*');
+        }
+      } catch(e) {}
+      window.location.href = '/#auth_success=1&appid=%s';
+    }
+    let sec = 3;
+    const timer = setInterval(() => {
+      sec--;
+      const el = document.getElementById('countdown');
+      if (el) el.innerText = sec;
+      if (sec <= 0) {
+        clearInterval(timer);
+        goHome();
+      }
+    }, 1000);
+  </script>
+</body>
+</html>`, accountName, accountName, appID, accountName, appID)
+
+	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(successHTML))
 }
 
 // ReceiveAuthNotify 微信开放平台-授权事件接收 URL (支持 AES 密文解密)

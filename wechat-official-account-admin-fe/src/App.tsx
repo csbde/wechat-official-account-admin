@@ -29,6 +29,27 @@ export const App: React.FC = () => {
   const { token, setAuth } = useAuthStore()
   const [currentTab, setCurrentTab] = useState('dashboard')
 
+  // 监听微信开放平台第三方扫码授权成功事件
+  useEffect(() => {
+    const handleAuthMessage = (e: MessageEvent) => {
+      if (e.data && e.data.type === 'WECHAT_AUTH_SUCCESS') {
+        queryClient.invalidateQueries({ queryKey: ['accounts'] })
+        toast.success(`🎉 微信公众号 [${e.data.name || e.data.appid}] 已成功授权并接入托管！`)
+      }
+    }
+    window.addEventListener('message', handleAuthMessage)
+
+    // 检查 URL 中是否有授权成功的标志
+    const hash = window.location.hash
+    if (hash && hash.includes('auth_success=1')) {
+      queryClient.invalidateQueries({ queryKey: ['accounts'] })
+      toast.success('🎉 微信公众号已成功授权接入，已为您自动同步并托管！')
+      window.history.replaceState(null, '', window.location.pathname)
+    }
+
+    return () => window.removeEventListener('message', handleAuthMessage)
+  }, [])
+
   // 检测 URL Hash 中是否携带 OIDC 返回的 Token
   useEffect(() => {
     const hash = window.location.hash
