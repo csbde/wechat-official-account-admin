@@ -31,11 +31,12 @@ func (h *SystemHandler) UserList(c *gin.Context) {
 	Ok(c, users)
 }
 
-// CreateUser 创建系统用户 (强制绑定当前租户)
+// CreateUser 创建系统用户 (支持邮箱配置用于 OIDC 自动匹配)
 func (h *SystemHandler) CreateUser(c *gin.Context) {
 	tenantID := GetTenantID(c)
 	var req struct {
 		Username string `json:"username" binding:"required"`
+		Email    string `json:"email"`
 		Password string `json:"password" binding:"required"`
 		Nickname string `json:"nickname"`
 		Role     string `json:"role"`
@@ -52,6 +53,15 @@ func (h *SystemHandler) CreateUser(c *gin.Context) {
 		return
 	}
 
+	if req.Email != "" {
+		var emailCount int64
+		database.DB.Model(&model.User{}).Where("email = ?", req.Email).Count(&emailCount)
+		if emailCount > 0 {
+			Fail(c, http.StatusBadRequest, "该邮箱已被其他账号使用")
+			return
+		}
+	}
+
 	hash, _ := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	role := req.Role
 	if role == "" || role == "superadmin" {
@@ -59,8 +69,9 @@ func (h *SystemHandler) CreateUser(c *gin.Context) {
 	}
 
 	user := model.User{
-		TenantID: tenantID, // 严格隔离归属当前租户
+		TenantID: tenantID,
 		Username: req.Username,
+		Email:    req.Email,
 		Password: string(hash),
 		Nickname: req.Nickname,
 		Role:     role,
@@ -88,6 +99,7 @@ func (h *SystemHandler) UpdateUser(c *gin.Context) {
 
 	var req struct {
 		Nickname string `json:"nickname"`
+		Email    string `json:"email"`
 		Password string `json:"password"`
 		Role     string `json:"role"`
 		Status   *int   `json:"status"`
@@ -99,6 +111,15 @@ func (h *SystemHandler) UpdateUser(c *gin.Context) {
 
 	if req.Nickname != "" {
 		user.Nickname = req.Nickname
+	}
+	if req.Email != "" {
+		var emailCount int64
+		database.DB.Model(&model.User{}).Where("email = ? AND id != ?", req.Email, user.ID).Count(&emailCount)
+		if emailCount > 0 {
+			Fail(c, http.StatusBadRequest, "该邮箱已被其他账号占用")
+			return
+		}
+		user.Email = req.Email
 	}
 	if req.Role != "" && req.Role != "superadmin" {
 		user.Role = req.Role
@@ -191,6 +212,7 @@ func (h *SystemHandler) HealthCheck(c *gin.Context) {
 		"redis":         redisStatus,
 		"asynq":         asynqStatus,
 		"telemetry":     "active",
+		"oidc":          "active",
 		"server_time":   time.Now().Format(time.RFC3339),
 	})
 }

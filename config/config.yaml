@@ -6,12 +6,8 @@ server:
   static_dir: "./files"
 
 database:
-  # 数据库类型: sqlite (默认) 或 postgres
-  # 默认不配置 pgsql 或 host 为空时自动使用 sqlite
   type: sqlite
   sqlite_path: "./data/woaa.db"
-
-  # PostgreSQL 配置 (当 type: postgres 且 host 不为空时启用)
   host: ""
   port: 5432
   user: ""
@@ -34,6 +30,19 @@ jwt:
   secret: woaa-super-secure-jwt-token-secret-2025
   expire_hours: 72
   issuer: woaa-admin
+
+# OIDC 单点登录配置 (支持 Keycloak / Authing / Okta / Google / CAS / 自建 OIDC 服务)
+# 默认按照用户的 email 进行自动匹配与绑定
+oidc:
+  enabled: true
+  issuer: "" # 例如 https://auth.example.com
+  client_id: "woaa_client"
+  client_secret: "woaa_secret_123"
+  redirect_uri: "" # 留空时自动取当前 host/api/auth/oidc/callback
+  scopes:
+    - openid
+    - profile
+    - email
 
 wechat:
   public_host: ""

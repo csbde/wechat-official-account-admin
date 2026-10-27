@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/anchel/wechat-official-account-admin/internal/auth"
@@ -32,7 +33,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 
 	var user model.User
-	if err := database.DB.Where("username = ?", req.Username).First(&user).Error; err != nil {
+	if err := database.DB.Where("username = ? OR email = ?", req.Username, req.Username).First(&user).Error; err != nil {
 		Fail(c, http.StatusUnauthorized, "用户名或密码错误")
 		return
 	}
@@ -47,7 +48,6 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	// 查询租户
 	var tenant model.Tenant
 	if user.TenantID > 0 {
 		database.DB.First(&tenant, user.TenantID)
@@ -89,6 +89,48 @@ func (h *AuthHandler) UserInfo(c *gin.Context) {
 // Logout 退出登录
 func (h *AuthHandler) Logout(c *gin.Context) {
 	Ok(c, gin.H{"status": "logged_out"})
+}
+
+// OIDCLogin 发起 OIDC 授权登录跳转
+func (h *AuthHandler) OIDCLogin(c *gin.Context) {
+	authURL, state, err := auth.DefaultOIDCService.BuildAuthURL(c.Request.Context(), c.Request.Host)
+	if err != nil {
+		Fail(c, http.StatusInternalServerError, "构建 OIDC 授权链接失败: "+err.Error())
+		return
+	}
+	Ok(c, gin.H{
+		"auth_url": authURL,
+		"state":    state,
+	})
+}
+
+// OIDCCallback 处理 OIDC 回调，自动完成邮箱匹配绑定并下发 Token
+func (h *AuthHandler) OIDCCallback(c *gin.Context) {
+	code := c.Query("code")
+	if code == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "missing oidc authorization code"})
+		return
+	}
+
+	user, token, err := auth.DefaultOIDCService.HandleCallback(c.Request.Context(), code, c.Request.Host)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "oidc callback error: " + err.Error()})
+		return
+	}
+
+	// 如果是浏览器页面直接重定向回前端 SPA
+	accept := c.GetHeader("Accept")
+	if c.Query("format") == "json" && accept != "text/html" {
+		Ok(c, gin.H{
+			"token": token,
+			"user":  user,
+		})
+		return
+	}
+
+	// 重定向至前端并在 Hash 中注入 Token，前端 SPA 自动识别存储
+	redirectURL := fmt.Sprintf("/#token=%s&user=%s", token, user.Username)
+	c.Redirect(http.StatusFound, redirectURL)
 }
 
 // SSOCallback 单点登录授权回调

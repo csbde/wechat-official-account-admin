@@ -2,9 +2,10 @@ import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
+import { Switch } from '@/components/ui/switch'
 import {
   Table,
   TableHeader,
@@ -22,13 +23,14 @@ import {
 } from '@/components/ui/dialog'
 import {
   Shield,
-  UserCheck,
   Plus,
   Trash2,
   KeyRound,
   ExternalLink,
   Server,
   Globe,
+  Mail,
+  Fingerprint,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatDate } from '@/lib/utils'
@@ -38,6 +40,7 @@ export const SystemPage: React.FC = () => {
   const [userModalOpen, setUserModalOpen] = useState(false)
   const [editingUserId, setEditingUserId] = useState<number | null>(null)
   const [username, setUsername] = useState('')
+  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [nickname, setNickname] = useState('')
   const [role, setRole] = useState('operator')
@@ -69,6 +72,16 @@ export const SystemPage: React.FC = () => {
     },
   })
 
+  // 状态启停
+  const toggleStatusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: number; status: number }) =>
+      api.put(`/api/system/users/${id}`, { status }),
+    onSuccess: () => {
+      toast.success('用户状态已变更')
+      queryClient.invalidateQueries({ queryKey: ['system-users'] })
+    },
+  })
+
   // 删除用户
   const deleteUserMutation = useMutation({
     mutationFn: (id: number) => api.delete(`/api/system/users/${id}`),
@@ -81,6 +94,7 @@ export const SystemPage: React.FC = () => {
   const openCreateModal = () => {
     setEditingUserId(null)
     setUsername('')
+    setEmail('')
     setPassword('')
     setNickname('')
     setRole('operator')
@@ -90,6 +104,7 @@ export const SystemPage: React.FC = () => {
   const openEditModal = (u: any) => {
     setEditingUserId(u.id)
     setUsername(u.username)
+    setEmail(u.email || '')
     setPassword('')
     setNickname(u.nickname || '')
     setRole(u.role || 'operator')
@@ -103,6 +118,7 @@ export const SystemPage: React.FC = () => {
     }
     saveUserMutation.mutate({
       username,
+      email: email.trim() || undefined,
       password: password || undefined,
       nickname,
       role,
@@ -115,7 +131,7 @@ export const SystemPage: React.FC = () => {
         <div>
           <h2 className="text-2xl font-bold tracking-tight">系统管理与 RBAC 权限</h2>
           <p className="text-sm text-muted-foreground">
-            基于 Casbin 角色访问控制，管理操作员账号、服务器出口 IP 与 OpenAPI 交互文档
+            用户维护、邮箱设置（用于 OIDC 自动匹配绑定）、角色授权与 API 调试
           </p>
         </div>
 
@@ -147,33 +163,33 @@ export const SystemPage: React.FC = () => {
           </CardHeader>
           <CardContent>
             <div className="text-xl font-bold font-mono">{ipData?.ip || '获取中...'}</div>
-            <p className="text-xs text-muted-foreground mt-1">需加入微信公众平台后台 IP 白名单</p>
+            <p className="text-xs text-muted-foreground mt-1">请配置进微信公众平台后台 IP 白名单</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <Shield className="h-4 w-4 text-primary" />
-              <span>权限架构 (Casbin RBAC)</span>
+              <Fingerprint className="h-4 w-4 text-primary" />
+              <span>OIDC 邮箱自动绑定</span>
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-xl font-bold">Admin / Operator</div>
-            <p className="text-xs text-muted-foreground mt-1">PostgreSQL gorm-adapter 持久化策略</p>
+            <div className="text-xl font-bold text-primary">Active</div>
+            <p className="text-xs text-muted-foreground mt-1">第三方 OIDC 登录时按用户邮箱自动匹配绑定</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <Server className="h-4 w-4 text-purple-600" />
-              <span>单点登录 (SSO) 支持</span>
+              <Shield className="h-4 w-4 text-purple-600" />
+              <span>Casbin RBAC 细粒度授权</span>
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-xl font-bold">JWT + OAuth2 Ready</div>
-            <p className="text-xs text-muted-foreground mt-1">支持与企业微信/飞书/OIDC 无缝接入</p>
+            <div className="text-xl font-bold">多租户行级隔离</div>
+            <p className="text-xs text-muted-foreground mt-1">跨租户请求由中间件物理级严格阻断</p>
           </CardContent>
         </Card>
       </div>
@@ -188,9 +204,10 @@ export const SystemPage: React.FC = () => {
             <TableHeader>
               <TableRow>
                 <TableHead>用户名</TableHead>
+                <TableHead>绑定邮箱 (OIDC)</TableHead>
                 <TableHead>昵称</TableHead>
                 <TableHead>角色 (Role)</TableHead>
-                <TableHead>状态</TableHead>
+                <TableHead>账号状态</TableHead>
                 <TableHead>创建时间</TableHead>
                 <TableHead className="text-right">操作</TableHead>
               </TableRow>
@@ -198,25 +215,42 @@ export const SystemPage: React.FC = () => {
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">加载中...</TableCell>
+                  <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">加载中...</TableCell>
                 </TableRow>
               ) : users?.map((u) => (
                 <TableRow key={u.id} className="text-xs">
                   <TableCell className="font-semibold font-mono">{u.username}</TableCell>
+                  <TableCell className="font-mono text-muted-foreground">
+                    {u.email ? (
+                      <span className="text-foreground flex items-center gap-1">
+                        <Mail className="h-3 w-3 text-emerald-600" />
+                        <span>{u.email}</span>
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground/60">未绑定</span>
+                    )}
+                  </TableCell>
                   <TableCell>{u.nickname || '-'}</TableCell>
                   <TableCell>
-                    <Badge variant={u.role === 'admin' ? 'default' : 'secondary'} className="text-[10px] capitalize">
+                    <Badge variant={u.role === 'admin' || u.role === 'superadmin' ? 'default' : 'secondary'} className="text-[10px] capitalize">
                       {u.role}
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={u.status === 1 ? 'success' : 'destructive'} className="text-[10px]">
-                      {u.status === 1 ? '正常' : '禁用'}
-                    </Badge>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={u.status === 1}
+                        disabled={u.id === 1}
+                        onCheckedChange={(checked) =>
+                          toggleStatusMutation.mutate({ id: u.id, status: checked ? 1 : 0 })
+                        }
+                      />
+                      <span className="text-[11px] text-muted-foreground">{u.status === 1 ? '正常' : '禁用'}</span>
+                    </div>
                   </TableCell>
                   <TableCell className="text-muted-foreground">{formatDate(u.created_at)}</TableCell>
                   <TableCell className="text-right space-x-1">
-                    <Button variant="ghost" size="icon" onClick={() => openEditModal(u)} className="h-7 w-7">
+                    <Button variant="ghost" size="icon" onClick={() => openEditModal(u)} className="h-7 w-7" title="修改信息/重置密码">
                       <KeyRound className="h-3.5 w-3.5" />
                     </Button>
                     {u.id !== 1 && (
@@ -229,6 +263,7 @@ export const SystemPage: React.FC = () => {
                           }
                         }}
                         className="h-7 w-7 text-destructive hover:bg-destructive/10"
+                        title="删除用户"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>
@@ -260,6 +295,19 @@ export const SystemPage: React.FC = () => {
             </div>
 
             <div className="space-y-1.5">
+              <label className="text-xs font-semibold flex items-center justify-between">
+                <span>绑定邮箱 (用于 OIDC 单点登录自动匹配)</span>
+                <span className="text-[10px] text-primary">推荐配置</span>
+              </label>
+              <Input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="例如: user@company.com"
+              />
+            </div>
+
+            <div className="space-y-1.5">
               <label className="text-xs font-semibold">用户昵称</label>
               <Input
                 value={nickname}
@@ -270,7 +318,7 @@ export const SystemPage: React.FC = () => {
 
             <div className="space-y-1.5">
               <label className="text-xs font-semibold">
-                {editingUserId ? '重置密码 (留空则不修改)' : '登录密码 *'}
+                {editingUserId ? '重置密码 (留空则保持不变)' : '登录密码 *'}
               </label>
               <Input
                 type="password"
@@ -288,7 +336,7 @@ export const SystemPage: React.FC = () => {
                 className="w-full h-9 rounded-lg border border-input bg-background px-3 text-sm"
               >
                 <option value="operator">Operator (运营操作员)</option>
-                <option value="admin">Admin (超级管理员)</option>
+                <option value="admin">Admin (租户管理员)</option>
               </select>
             </div>
 

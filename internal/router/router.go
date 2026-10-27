@@ -119,6 +119,8 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 	{
 		authGroup.POST("/login", authHandler.Login)
 		authGroup.POST("/sso/callback", authHandler.SSOCallback)
+		authGroup.GET("/oidc/login", authHandler.OIDCLogin)
+		authGroup.GET("/oidc/callback", authHandler.OIDCCallback)
 	}
 	api.GET("/system/public-ip", systemHandler.PublicIP)
 	api.GET("/system/health", systemHandler.HealthCheck)

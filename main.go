@@ -175,6 +175,7 @@ func initDefaultTenantAndAdmin(db *gorm.DB) {
 		admin := model.User{
 			TenantID: 1, // 属于默认租户
 			Username: "admin",
+			Email:    "admin@kkio.com",
 			Password: string(hash),
 			Nickname: "超级管理员",
 			Role:     "superadmin",

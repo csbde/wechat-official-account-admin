@@ -7,11 +7,11 @@ import { useAuthStore } from '@/stores/auth'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Radio, Lock, User, ArrowRight, ShieldCheck, Key } from 'lucide-react'
+import { Radio, Lock, User, ArrowRight, ShieldCheck, Key, Fingerprint, Mail } from 'lucide-react'
 import { toast } from 'sonner'
 
 const loginSchema = z.object({
-  username: z.string().min(1, '请输入登录账号'),
+  username: z.string().min(1, '请输入登录用户名或邮箱'),
   password: z.string().min(1, '请输入密码'),
 })
 
@@ -20,6 +20,7 @@ type LoginFormData = z.infer<typeof loginSchema>
 export const LoginPage: React.FC = () => {
   const { setAuth } = useAuthStore()
   const [loading, setLoading] = useState(false)
+  const [loadingOIDC, setLoadingOIDC] = useState(false)
 
   const form = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),
@@ -47,24 +48,22 @@ export const LoginPage: React.FC = () => {
   const handleQuickFill = () => {
     form.setValue('username', 'admin')
     form.setValue('password', 'admin123')
-    toast.info('已快速填入默认账号: admin / admin123')
+    toast.info('已快速填入初始管理员账号: admin / admin123')
   }
 
-  const handleSSO = async () => {
+  // 发起 OIDC 单点登录 (自动按邮箱匹配)
+  const handleOIDCLogin = async () => {
     try {
-      setLoading(true)
-      const res: any = await api.post('/api/auth/sso/callback', {
-        provider: 'wechat_work',
-        code: 'sso_demo_user',
-      })
-      if (res.token && res.user) {
-        setAuth(res.token, res.user, res.tenant)
-        toast.success('SSO 单点登录验证成功！')
+      setLoadingOIDC(true)
+      const res: any = await api.get('/api/auth/oidc/login')
+      if (res.auth_url) {
+        toast.loading('正在跳转至 OIDC 身份认证服务...')
+        window.location.href = res.auth_url
       }
-    } catch (err) {
-      toast.error('SSO 模拟登录失败')
+    } catch (e: any) {
+      toast.error('OIDC 发起失败: ' + (e.message || '网络错误'))
     } finally {
-      setLoading(false)
+      setLoadingOIDC(false)
     }
   }
 
@@ -80,7 +79,7 @@ export const LoginPage: React.FC = () => {
             WOAA Admin Pro
           </h1>
           <p className="text-sm text-slate-300">
-            微信公众号综合管理运营平台 (v2.0)
+            微信公众号综合管理平台 · 支持 OIDC 单点登录
           </p>
         </div>
 
@@ -89,7 +88,7 @@ export const LoginPage: React.FC = () => {
           <CardHeader className="space-y-1 pb-4">
             <CardTitle className="text-xl">账号密码登录</CardTitle>
             <CardDescription className="text-xs">
-              输入您的后台管理员或操作员凭据进入系统
+              输入您的管理员用户名或邮箱直接登录系统
             </CardDescription>
           </CardHeader>
 
@@ -98,10 +97,10 @@ export const LoginPage: React.FC = () => {
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold flex items-center gap-1.5">
                   <User className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span>用户名</span>
+                  <span>用户名 / 邮箱</span>
                 </label>
                 <Input
-                  placeholder="admin"
+                  placeholder="admin 或 admin@kkio.com"
                   {...form.register('username')}
                   className="bg-background/60"
                 />
@@ -153,15 +152,17 @@ export const LoginPage: React.FC = () => {
               </button>
             </div>
 
-            <div className="w-full pt-2">
+            {/* OIDC 企业单点登录按钮 */}
+            <div className="w-full space-y-2 pt-1">
               <Button
                 variant="outline"
                 type="button"
-                onClick={handleSSO}
-                className="w-full text-xs h-9 border-dashed gap-1.5"
+                onClick={handleOIDCLogin}
+                disabled={loadingOIDC}
+                className="w-full text-xs h-9 border-dashed border-emerald-500/50 hover:bg-emerald-500/10 gap-1.5 font-medium text-foreground"
               >
-                <ShieldCheck className="h-4 w-4 text-emerald-500" />
-                <span>企业微信 / SSO 单点登录</span>
+                <Fingerprint className="h-4 w-4 text-emerald-500" />
+                <span>OIDC 企业单点登录 (自动按邮箱匹配绑定)</span>
               </Button>
             </div>
           </CardFooter>
@@ -169,7 +170,7 @@ export const LoginPage: React.FC = () => {
 
         {/* 底部版权 */}
         <div className="text-center text-xs text-slate-400">
-          Powered by Go Gin & React TypeScript · MIT Licensed
+          Powered by Go 1.26+ & React 18 · MIT Licensed
         </div>
       </div>
     </div>

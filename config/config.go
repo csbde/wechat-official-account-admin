@@ -12,6 +12,7 @@ type Config struct {
 	Redis     RedisConfig     `mapstructure:"redis"`
 	Asynq     AsynqConfig     `mapstructure:"asynq"`
 	JWT       JWTConfig       `mapstructure:"jwt"`
+	OIDC      OIDCConfig      `mapstructure:"oidc"`
 	Wechat    WechatConfig    `mapstructure:"wechat"`
 	Telemetry TelemetryConfig `mapstructure:"telemetry"`
 }
@@ -53,6 +54,15 @@ type JWTConfig struct {
 	Issuer      string `mapstructure:"issuer"`
 }
 
+type OIDCConfig struct {
+	Enabled      bool     `mapstructure:"enabled"`
+	Issuer       string   `mapstructure:"issuer"` // e.g. https://auth.company.com/realms/master
+	ClientID     string   `mapstructure:"client_id"`
+	ClientSecret string   `mapstructure:"client_secret"`
+	RedirectURI  string   `mapstructure:"redirect_uri"` // e.g. http://localhost:9305/api/auth/oidc/callback
+	Scopes       []string `mapstructure:"scopes"`       // openid, profile, email
+}
+
 type WechatConfig struct {
 	PublicHost string `mapstructure:"public_host"`
 	Proxy      string `mapstructure:"proxy"`
@@ -81,7 +91,7 @@ func Load(configPath string) (*Config, error) {
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
 
-	// 默认值：默认使用 SQLite，开箱即用，无需 PostgreSQL 服务
+	// 默认值
 	v.SetDefault("server.port", 9305)
 	v.SetDefault("server.mode", "debug")
 	v.SetDefault("server.allow_origins", []string{"*"})
@@ -108,6 +118,13 @@ func Load(configPath string) (*Config, error) {
 	v.SetDefault("jwt.secret", "woaa-super-secure-jwt-token-secret-2025")
 	v.SetDefault("jwt.expire_hours", 72)
 	v.SetDefault("jwt.issuer", "woaa-admin")
+
+	v.SetDefault("oidc.enabled", false)
+	v.SetDefault("oidc.issuer", "")
+	v.SetDefault("oidc.client_id", "")
+	v.SetDefault("oidc.client_secret", "")
+	v.SetDefault("oidc.redirect_uri", "")
+	v.SetDefault("oidc.scopes", []string{"openid", "profile", "email"})
 
 	v.SetDefault("telemetry.service_name", "wechat-official-account-admin")
 	v.SetDefault("telemetry.environment", "development")

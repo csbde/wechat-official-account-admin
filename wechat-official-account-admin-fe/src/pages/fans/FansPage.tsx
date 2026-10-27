@@ -9,7 +9,6 @@ import {
 import { api, PageResult } from '@/lib/api'
 import { useAppStore } from '@/stores/app'
 import { Button } from '@/components/ui/button'
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -33,9 +32,8 @@ import {
   RefreshCw,
   Search,
   Edit2,
-  Plus,
   Trash2,
-  CheckSquare,
+  UserCheck,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatDate } from '@/lib/utils'
@@ -101,7 +99,16 @@ export const FansPage: React.FC = () => {
     },
   })
 
-  // 批量打/去标签
+  // 删除标签
+  const deleteTagMutation = useMutation({
+    mutationFn: (id: number) => api.delete(`/api/fans/tags/${id}`),
+    onSuccess: () => {
+      toast.success('标签已删除')
+      queryClient.invalidateQueries({ queryKey: ['fans-tags'] })
+    },
+  })
+
+  // 批量打/移除标签
   const batchTagMutation = useMutation({
     mutationFn: (values: { openids: string[]; tag_id: number; action: string }) =>
       api.post('/api/fans/tags/batch', values),
@@ -156,7 +163,7 @@ export const FansPage: React.FC = () => {
         header: '粉丝用户',
         cell: ({ row }) => (
           <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-full bg-muted overflow-hidden flex items-center justify-center font-bold text-xs text-muted-foreground shrink-0">
+            <div className="h-9 w-9 rounded-full bg-muted overflow-hidden flex items-center justify-center font-bold text-xs text-muted-foreground shrink-0 border">
               {row.original.headimgurl ? (
                 <img src={row.original.headimgurl} alt="" className="h-full w-full object-cover" />
               ) : (
@@ -254,7 +261,7 @@ export const FansPage: React.FC = () => {
         <div>
           <h2 className="text-2xl font-bold tracking-tight">粉丝与标签管理</h2>
           <p className="text-sm text-muted-foreground">
-            微信公众号粉丝全量管理、多维搜索、设置备注与批量标签操作
+            粉丝全量表格管理、多维搜索、设置备注与批量标签操作
           </p>
         </div>
 
@@ -325,6 +332,26 @@ export const FansPage: React.FC = () => {
               className="h-7 text-xs bg-background border rounded px-1 text-foreground"
             >
               <option value="">批量打标签...</option>
+              {tags?.map((t) => (
+                <option key={t.tag_id} value={t.tag_id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+            <select
+              onChange={(e) => {
+                const tagId = parseInt(e.target.value)
+                if (tagId) {
+                  batchTagMutation.mutate({
+                    openids: selectedOpenIDs,
+                    tag_id: tagId,
+                    action: 'remove',
+                  })
+                }
+              }}
+              className="h-7 text-xs bg-background border rounded px-1 text-foreground"
+            >
+              <option value="">批量移除标签...</option>
               {tags?.map((t) => (
                 <option key={t.tag_id} value={t.tag_id}>
                   {t.name}
@@ -437,7 +464,7 @@ export const FansPage: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      {/* 标签管理弹窗 */}
+      {/* 标签管理弹窗 (支持新增与删除) */}
       <Dialog open={tagModalOpen} onOpenChange={setTagModalOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -462,7 +489,20 @@ export const FansPage: React.FC = () => {
                     <span className="font-semibold">{t.name}</span>
                     <Badge variant="outline" className="text-[10px]">{t.count} 人</Badge>
                   </div>
-                  <span className="text-[10px] text-muted-foreground font-mono">ID: {t.tag_id}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-muted-foreground font-mono">ID: {t.tag_id}</span>
+                    <button
+                      onClick={() => {
+                        if (confirm(`确认删除标签 "${t.name}"？`)) {
+                          deleteTagMutation.mutate(t.id)
+                        }
+                      }}
+                      className="text-muted-foreground hover:text-destructive"
+                      title="删除标签"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>

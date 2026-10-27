@@ -18,18 +18,21 @@ type Tenant struct {
 	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
-// User 系统管理员及后台用户 (多租户隔离)
+// User 系统管理员及后台用户 (支持多租户隔离与 OIDC 邮箱绑定)
 type User struct {
 	ID          uint           `gorm:"primaryKey" json:"id"`
 	TenantID    uint           `gorm:"index;not null;default:1" json:"tenant_id"`
 	Username    string         `gorm:"size:64;not null" json:"username"`
+	Email       string         `gorm:"size:128;index" json:"email"` // 邮箱 (用于与 OIDC 邮箱自动匹配绑定)
 	Password    string         `gorm:"size:255;not null" json:"-"`
 	Nickname    string         `gorm:"size:64" json:"nickname"`
 	Avatar      string         `gorm:"size:255" json:"avatar"`
-	Role        string         `gorm:"size:32;default:'operator'" json:"role"`
-	Status      int            `gorm:"default:1" json:"status"`
+	Role        string         `gorm:"size:32;default:'operator'" json:"role"` // superadmin, admin, operator
+	Status      int            `gorm:"default:1" json:"status"`                // 1: 正常, 0: 禁用
 	SSOProvider string         `gorm:"size:32" json:"sso_provider,omitempty"`
 	SSOUID      string         `gorm:"size:128;index" json:"sso_uid,omitempty"`
+	OIDCIssuer  string         `gorm:"size:255" json:"oidc_issuer,omitempty"`
+	OIDCSub     string         `gorm:"size:128;index" json:"oidc_sub,omitempty"`
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
 	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
@@ -38,7 +41,7 @@ type User struct {
 // WxOpenComponent 微信开放平台-第三方平台凭证与配置
 type WxOpenComponent struct {
 	ID                  uint           `gorm:"primaryKey" json:"id"`
-	TenantID            uint           `gorm:"index;not null;default:1" json:"tenant_id"` // 多租户隔离
+	TenantID            uint           `gorm:"index;not null;default:1" json:"tenant_id"`
 	Name                string         `gorm:"size:128;not null" json:"name"`
 	ComponentAppID      string         `gorm:"size:64;not null;index" json:"component_appid"`
 	ComponentAppSecret  string         `gorm:"size:128;not null" json:"component_appsecret"`
@@ -60,16 +63,16 @@ type WxAccount struct {
 	TenantID               uint           `gorm:"index;not null;default:1" json:"tenant_id"`
 	Name                   string         `gorm:"size:100;not null" json:"name"`
 	AppID                  string         `gorm:"size:64;not null;index" json:"appid"`
-	AppSecret              string         `gorm:"size:128" json:"appsecret"` // 授权接入时可为空
+	AppSecret              string         `gorm:"size:128" json:"appsecret"`
 	Token                  string         `gorm:"size:128" json:"token"`
 	EncodingAESKey         string         `gorm:"size:128" json:"encoding_aes_key"`
 	OriginalID             string         `gorm:"size:64" json:"original_id"`
 	QRCodeURL              string         `gorm:"size:255" json:"qrcode_url"`
 	AvatarURL              string         `gorm:"size:255" json:"avatar_url"`
-	AccountType            string         `gorm:"size:32;default:'direct'" json:"account_type"` // direct: 直接配置, authorized: 第三方平台扫码授权代管
+	AccountType            string         `gorm:"size:32;default:'direct'" json:"account_type"` // direct, authorized
 	ComponentAppID         string         `gorm:"size:64;index" json:"component_appid,omitempty"`
 	AuthorizerRefreshToken string         `gorm:"size:255" json:"authorizer_refresh_token,omitempty"`
-	FuncInfo               string         `gorm:"type:text" json:"func_info,omitempty"` // 授权的功能权限列表 JSON
+	FuncInfo               string         `gorm:"type:text" json:"func_info,omitempty"`
 	Enabled                bool           `gorm:"default:true" json:"enabled"`
 	IsDefault              bool           `gorm:"default:false" json:"is_default"`
 	Description            string         `gorm:"size:255" json:"description"`
@@ -83,7 +86,7 @@ type WxMenu struct {
 	ID          uint           `gorm:"primaryKey" json:"id"`
 	TenantID    uint           `gorm:"index;not null;default:1" json:"tenant_id"`
 	AppID       string         `gorm:"size:64;index;not null" json:"appid"`
-	MenuType    string         `gorm:"size:32;default:'normal'" json:"menu_type"`
+	MenuType    string         `gorm:"size:32;default:'normal'" json:"menu_type"` // normal, conditional
 	MenuID      string         `gorm:"size:64" json:"menu_id"`
 	Name        string         `gorm:"size:128" json:"name"`
 	MenuData    string         `gorm:"type:text" json:"menu_data"`
