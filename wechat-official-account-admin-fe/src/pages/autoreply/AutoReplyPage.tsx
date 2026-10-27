@@ -168,7 +168,7 @@ export const AutoReplyPage: React.FC = () => {
         model: aiModel,
         prompt: testPrompt,
       })
-      setTestResponse(res.data?.reply || '测试成功，但 AI 未返回文字')
+      setTestResponse(res?.reply || '测试成功，但 AI 未返回文字')
       toast.success('AI 接口连通正常！')
     } catch (e: any) {
       toast.error(e.message || '测试失败，请检查 BaseURL 或 APIKey')

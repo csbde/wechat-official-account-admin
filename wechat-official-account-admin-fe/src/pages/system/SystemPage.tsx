@@ -129,7 +129,7 @@ export const SystemPage: React.FC = () => {
     try {
       setTestingOIDC(true)
       const res: any = await api.post('/api/system/oidc/test', { issuer: oidcIssuer })
-      setTestResult(res.data)
+      setTestResult(res)
       toast.success('OIDC 端点连通测试成功！')
     } catch (e: any) {
       toast.error(e.message || '连通失败，请检查 Issuer 地址')

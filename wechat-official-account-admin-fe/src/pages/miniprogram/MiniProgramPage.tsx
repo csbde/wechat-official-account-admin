@@ -273,7 +273,7 @@ export const MiniProgramPage: React.FC = () => {
         appid: currentApp.appid,
         js_code: jsCode.trim(),
       })
-      setLoginResult(res.data)
+      setLoginResult(res)
       toast.success('免密换取 session 成功！')
     } catch (e: any) {
       toast.error('换取失败: ' + (e.message || 'code 无效或已过期'))

@@ -30,6 +30,7 @@ import {
   Layers,
   Settings,
 } from 'lucide-react'
+import { AuthorizerDetailView } from './AuthorizerDetail'
 import { toast } from 'sonner'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -66,6 +67,8 @@ export const AccountsPage: React.FC = () => {
   const [detailModalOpen, setDetailModalOpen] = useState(false)
   const [currentDetail, setCurrentDetail] = useState<any>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
+  const [detailError, setDetailError] = useState('')
+  const [detailTarget, setDetailTarget] = useState<any>(null)
 
   // 获取公众号列表
   const { data: accounts, isLoading } = useQuery<WxAccount[]>({
@@ -143,17 +146,26 @@ export const AccountsPage: React.FC = () => {
   }
 
   // 获取微信官方权威档案
-  const handleViewDetail = async (acc: any) => {
+  const fetchAuthorizerDetail = async (acc: any) => {
+    setLoadingDetail(true)
+    setDetailError('')
     try {
-      setLoadingDetail(true)
-      setDetailModalOpen(true)
+      // 注意: api 响应拦截器已把 {code,message,data} 解包，这里拿到的就是档案数据本身
       const res: any = await api.get(`/api/accounts/${acc.id}/authorizer-info`)
-      setCurrentDetail(res.data)
+      setCurrentDetail(res)
     } catch (e: any) {
-      toast.error('获取官方档案失败: ' + (e.message || '网络错误'))
+      setDetailError(e?.message || '获取微信官方档案失败，请检查该账号凭据与网络连通性')
+      setCurrentDetail(null)
     } finally {
       setLoadingDetail(false)
     }
+  }
+
+  const handleViewDetail = (acc: any) => {
+    setDetailTarget(acc)
+    setCurrentDetail(null)
+    setDetailModalOpen(true)
+    fetchAuthorizerDetail(acc)
   }
 
   // 保存第三方平台凭据
@@ -684,7 +696,7 @@ export const AccountsPage: React.FC = () => {
 
       {/* 微信官方权威档案与权限集详情弹窗 (api_get_authorizer_info) */}
       <Dialog open={detailModalOpen} onOpenChange={setDetailModalOpen}>
-        <DialogContent className="sm:max-w-xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-2xl max-h-[88vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Info className="h-5 w-5 text-primary" />
@@ -693,87 +705,22 @@ export const AccountsPage: React.FC = () => {
           </DialogHeader>
 
           {loadingDetail ? (
-            <div className="py-12 text-center text-xs text-muted-foreground">正在向微信官方调取最新档案...</div>
-          ) : currentDetail ? (
-            <div className="space-y-4 py-2 text-xs">
-              {/* 基本信息头部 */}
-              <div className="p-4 rounded-xl bg-muted/60 border flex items-start gap-4">
-                <div className="h-16 w-16 rounded-2xl overflow-hidden shrink-0 border bg-background shadow-sm">
-                  {currentDetail.authorizer_info?.head_img ? (
-                    <img src={currentDetail.authorizer_info.head_img} referrerPolicy="no-referrer" alt="" className="h-full w-full object-cover" />
-                  ) : (
-                    <div className="h-full w-full bg-primary/20 text-primary flex items-center justify-center font-bold text-lg">
-                      {currentDetail.account?.name?.slice(0, 1) || 'W'}
-                    </div>
-                  )}
-                </div>
-                <div className="space-y-1 flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-bold text-base text-foreground">{currentDetail.authorizer_info?.nick_name || currentDetail.account?.name}</span>
-                    <Badge variant="success" className="text-[10px]">
-                      {currentDetail.account?.account_type === 'authorized' ? '第三方平台托管' : '直连凭据'}
-                    </Badge>
-                  </div>
-                  <div className="font-mono text-muted-foreground text-[11px]">AppID: {currentDetail.account?.appid}</div>
-                  {currentDetail.authorizer_info?.user_name && (
-                    <div className="font-mono text-muted-foreground text-[11px]">原始 ID: {currentDetail.authorizer_info.user_name}</div>
-                  )}
-                </div>
+            <div className="py-14 text-center text-xs text-muted-foreground">正在向微信官方调取最新档案...</div>
+          ) : detailError ? (
+            <div className="space-y-4 py-2">
+              <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/25 text-xs text-red-700 dark:text-red-300 space-y-1">
+                <div className="font-semibold">调取微信官方档案失败</div>
+                <div className="break-words leading-relaxed">{detailError}</div>
               </div>
-
-              {/* 认证与主体信息 */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="p-3 rounded-lg border bg-card space-y-1">
-                  <div className="text-muted-foreground">认证主体名称:</div>
-                  <div className="font-semibold text-foreground truncate" title={currentDetail.authorizer_info?.principal_name}>
-                    {currentDetail.authorizer_info?.principal_name || '个人 / 未认证主体'}
-                  </div>
-                </div>
-                <div className="p-3 rounded-lg border bg-card space-y-1">
-                  <div className="text-muted-foreground">微信认证状态:</div>
-                  <div className="font-semibold text-emerald-600">
-                    {currentDetail.authorizer_info?.verify_type_info?.id === 0 ? '✓ 微信官方认证' : '未认证/普通'}
-                  </div>
-                </div>
-              </div>
-
-              {/* 功能介绍 */}
-              {currentDetail.authorizer_info?.signature && (
-                <div className="p-3 rounded-lg border bg-card space-y-1">
-                  <div className="text-muted-foreground">功能介绍:</div>
-                  <div className="text-foreground leading-relaxed">{currentDetail.authorizer_info.signature}</div>
-                </div>
-              )}
-
-              {/* 已授权权限集列表 (如果是第三方代管) */}
-              {currentDetail.func_info && currentDetail.func_info.length > 0 && (
-                <div className="space-y-1.5 p-3 rounded-lg border bg-card">
-                  <div className="font-semibold text-foreground flex items-center justify-between">
-                    <span>已授予第三方的权限集列表 (FuncInfo):</span>
-                    <Badge variant="outline" className="text-[10px]">{currentDetail.func_info.length} 项已授权</Badge>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5 pt-1 max-h-36 overflow-y-auto">
-                    {currentDetail.func_info.map((f: any, idx: number) => {
-                      const id = f.funcscope_category?.id
-                      const nameMap: Record<number, string> = {
-                        1: '消息管理权限', 2: '自定义菜单权限', 3: '粉丝管理权限',
-                        4: '素材管理权限', 7: '微信门店权限', 8: '微信卡券权限',
-                        11: '微信客服权限', 15: '快速注册小程序', 17: '微信开放平台基础',
-                      }
-                      return (
-                        <Badge key={idx} variant="secondary" className="text-[10px] py-0.5">
-                          {nameMap[id] || `权限集类别 ${id}`}
-                        </Badge>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
-
               <DialogFooter>
+                <Button size="sm" variant="outline" onClick={() => detailTarget && fetchAuthorizerDetail(detailTarget)}>
+                  重试
+                </Button>
                 <Button size="sm" onClick={() => setDetailModalOpen(false)}>关闭</Button>
               </DialogFooter>
             </div>
+          ) : currentDetail ? (
+            <AuthorizerDetailView detail={currentDetail} onClose={() => setDetailModalOpen(false)} />
           ) : null}
         </DialogContent>
       </Dialog>

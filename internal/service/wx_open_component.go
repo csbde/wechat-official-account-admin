@@ -242,6 +242,9 @@ func (s *WxOpenService) QueryAuth(ctx context.Context, componentAppID, authCode 
 	// 查找并同步公众号基本信息 (头像、昵称等)
 	accountName := fmt.Sprintf("授权公众号_%s", info.AuthorizerAppid[:min(len(info.AuthorizerAppid), 6)])
 	avatarUrl := ""
+	originalID := ""
+	qrCodeURL := ""
+	signature := ""
 	authorizerInfo, err := s.GetAuthorizerInfo(ctx, componentAppID, info.AuthorizerAppid)
 	if err == nil && authorizerInfo != nil {
 		if authorizerInfo.AuthorizerInfo.NickName != "" {
@@ -250,6 +253,10 @@ func (s *WxOpenService) QueryAuth(ctx context.Context, componentAppID, authCode 
 		if authorizerInfo.AuthorizerInfo.HeadImg != "" {
 			avatarUrl = authorizerInfo.AuthorizerInfo.HeadImg
 		}
+		// 一并落库微信权威档案中的原始ID、二维码与功能介绍，后续离线也能直接展示
+		originalID = authorizerInfo.AuthorizerInfo.UserName
+		qrCodeURL = authorizerInfo.AuthorizerInfo.QRCodeURL
+		signature = authorizerInfo.AuthorizerInfo.Signature
 	}
 
 	// 自动在当前租户下创建或更新公众号记录
@@ -265,8 +272,13 @@ func (s *WxOpenService) QueryAuth(ctx context.Context, componentAppID, authCode 
 			AuthorizerRefreshToken: info.AuthorizerRefreshToken,
 			FuncInfo:               string(funcInfoBytes),
 			AvatarURL:              avatarUrl,
+			OriginalID:             originalID,
+			QRCodeURL:              qrCodeURL,
 			Enabled:                true,
-			Description:            "由微信开放平台第三方授权接入托管",
+			Description:            signature,
+		}
+		if account.Description == "" {
+			account.Description = "由微信开放平台第三方授权接入托管"
 		}
 		database.DB.Create(&account)
 	} else {
@@ -277,6 +289,15 @@ func (s *WxOpenService) QueryAuth(ctx context.Context, componentAppID, authCode 
 		account.FuncInfo = string(funcInfoBytes)
 		if avatarUrl != "" {
 			account.AvatarURL = avatarUrl
+		}
+		if originalID != "" {
+			account.OriginalID = originalID
+		}
+		if qrCodeURL != "" {
+			account.QRCodeURL = qrCodeURL
+		}
+		if signature != "" && account.Description == "" {
+			account.Description = signature
 		}
 		account.Enabled = true
 		database.DB.Save(&account)
@@ -353,36 +374,62 @@ func (s *WxOpenService) RefreshAuthorizerToken(ctx context.Context, componentApp
 	return res.AuthorizerAccessToken, nil
 }
 
-// GetAuthorizerInfo 获取授权公众号的基本账号信息
+// WxAuthTypeInfo 微信账号类型 / 认证类型 (官方同时返回 id 与可读名称 name)
+type WxAuthTypeInfo struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+// WxConfirmInfo 权限集的确认状态 (部分权限集需要公众号管理员确认)
+type WxConfirmInfo struct {
+	NeedConfirm    int `json:"need_confirm"`
+	AlreadyConfirm int `json:"already_confirm"`
+	CanConfirm     int `json:"can_confirm"`
+}
+
+// AuthorizerFuncInfo 授权给第三方平台的单个权限集
+type AuthorizerFuncInfo struct {
+	FuncscopeCategory struct {
+		ID int `json:"id"`
+	} `json:"funcscope_category"`
+	ConfirmInfo *WxConfirmInfo `json:"confirm_info,omitempty"`
+}
+
+// AuthorizerBaseInfo 授权方基本信息 (api_get_authorizer_info 的 authorizer_info)
+// 注意: 微信会在同一响应里追加视频号/小店等新字段，类型以官方文档为准
+type AuthorizerBaseInfo struct {
+	NickName        string                 `json:"nick_name"`
+	HeadImg         string                 `json:"head_img"`
+	ServiceTypeInfo WxAuthTypeInfo         `json:"service_type_info"`
+	VerifyTypeInfo  WxAuthTypeInfo         `json:"verify_type_info"`
+	UserName        string                 `json:"user_name"` // 原始 ID
+	Alias           string                 `json:"alias"`     // 微信号 (可能为空)
+	QRCodeURL       string                 `json:"qrcode_url"`
+	PrincipalName   string                 `json:"principal_name"` // 主体全称
+	Signature       string                 `json:"signature"`      // 功能介绍
+	RegisterType    int                    `json:"register_type"`
+	AccountStatus   int                    `json:"account_status"`
+	BusinessInfo    map[string]interface{} `json:"business_info"`
+	BasicConfig     map[string]interface{} `json:"basic_config"`
+	MiniProgramInfo map[string]interface{} `json:"MiniProgramInfo,omitempty"`
+	ChannelsInfo    map[string]interface{} `json:"channels_info,omitempty"`
+	StoreInfo       map[string]interface{} `json:"store_info,omitempty"`
+	TalentInfo      map[string]interface{} `json:"talent_info,omitempty"`
+	SupplierInfo    map[string]interface{} `json:"supplier_info,omitempty"`
+}
+
 // AuthorizerFullInfo 微信官方授权账号全量详细档案
 type AuthorizerFullInfo struct {
-	AuthorizerInfo struct {
-		NickName        string                 `json:"nick_name"`
-		HeadImg         string                 `json:"head_img"`
-		ServiceTypeInfo map[string]int         `json:"service_type_info"`
-		VerifyTypeInfo  map[string]int         `json:"verify_type_info"`
-		UserName        string                 `json:"user_name"` // 原始ID
-		Alias           string                 `json:"alias"`     // 微信号
-		QRCodeURL       string                 `json:"qrcode_url"`
-		PrincipalName   string                 `json:"principal_name"` // 主体公司/个人全称
-		Signature       string                 `json:"signature"`      // 账号功能介绍
-		BusinessInfo    map[string]interface{} `json:"business_info"`
-		MiniProgramInfo map[string]interface{} `json:"MiniProgramInfo,omitempty"`
-	} `json:"authorizer_info"`
-	AuthorizationInfo struct {
-		AuthorizerAppid        string `json:"authorizer_appid"`
-		AuthorizerRefreshToken string `json:"authorizer_refresh_token,omitempty"`
-		FuncInfo               []struct {
-			FuncscopeCategory struct {
-				ID int `json:"id"`
-			} `json:"funcscope_category"`
-			ConfirmInfo struct {
-				NeedConfirm    int `json:"need_confirm"`
-				AlreadyConfirm int `json:"already_confirm"`
-				CanConfirm     int `json:"can_confirm"`
-			} `json:"confirm_info,omitempty"`
-		} `json:"func_info"`
-	} `json:"authorization_info"`
+	AuthorizerInfo    AuthorizerBaseInfo     `json:"authorizer_info"`
+	AuthorizationInfo AuthorizationInfo      `json:"authorization_info"`
+	Raw               map[string]interface{} `json:"-"` // 微信原始响应，用于前端兜底展示
+}
+
+// AuthorizationInfo 授权信息 (authorization_info)
+type AuthorizationInfo struct {
+	AuthorizerAppid        string               `json:"authorizer_appid"`
+	AuthorizerRefreshToken string               `json:"authorizer_refresh_token,omitempty"`
+	FuncInfo               []AuthorizerFuncInfo `json:"func_info"`
 }
 
 // GetAuthorizerInfo 获取授权公众号或小程序的完整官方档案
@@ -402,19 +449,22 @@ func (s *WxOpenService) GetAuthorizerInfo(ctx context.Context, componentAppID, a
 		return nil, err
 	}
 
-	var res struct {
-		AuthorizerFullInfo
-		Errcode int    `json:"errcode"`
-		Errmsg  string `json:"errmsg"`
+	// 先按 map 解析: 保证 errcode 判断与「原始响应」兜底展示不受字段类型变化影响
+	var raw map[string]interface{}
+	if err := json.Unmarshal(resp.Body(), &raw); err != nil {
+		return nil, fmt.Errorf("解析授权信息响应失败: %v", err)
 	}
-	if err := json.Unmarshal(resp.Body(), &res); err != nil {
-		return nil, fmt.Errorf("解析授权信息响应失败: %w", err)
-	}
-	if res.Errcode != 0 {
-		return nil, fmt.Errorf("[%d] %s", res.Errcode, res.Errmsg)
+	if code, ok := raw["errcode"].(float64); ok && int(code) != 0 {
+		msg, _ := raw["errmsg"].(string)
+		return nil, fmt.Errorf("[%d] %s", int(code), msg)
 	}
 
-	return &res.AuthorizerFullInfo, nil
+	// 再按结构体容错解析: 微信新增或调整个别字段类型时，不影响其余档案字段的展示
+	var res AuthorizerFullInfo
+	_ = json.Unmarshal(resp.Body(), &res)
+	res.Raw = raw
+
+	return &res, nil
 }
 
 // HandleNetworkPublishCheck 处理微信开放平台全网发布自动化测试用例

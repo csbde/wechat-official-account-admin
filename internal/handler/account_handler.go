@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/anchel/wechat-official-account-admin/internal/database"
 	"github.com/anchel/wechat-official-account-admin/internal/model"
@@ -217,11 +219,22 @@ func (h *AccountHandler) GetAuthorizerDetail(c *gin.Context) {
 		return
 	}
 
-	// 1. 若是开放平台第三方代管授权账号
+	// 授权时落库的权限集，作为兜底展示
+	storedFuncInfo := parseStoredFuncInfo(account.FuncInfo)
+
+	// 1. 开放平台第三方代管账号: 实时调用微信官方接口取权威档案
 	if account.AccountType == "authorized" && account.ComponentAppID != "" {
 		detail, err := service.DefaultWxOpenService.GetAuthorizerInfo(c.Request.Context(), account.ComponentAppID, account.AppID)
 		if err != nil {
-			Fail(c, http.StatusInternalServerError, "获取微信官方档案失败: "+err.Error())
+			// 官方接口失败时降级返回本地已落库档案，避免前端整页空白
+			Ok(c, gin.H{
+				"account":         account,
+				"authorizer_info": localAuthorizerInfo(account),
+				"func_info":       storedFuncInfo,
+				"source":          "local",
+				"official_error":  err.Error(),
+				"hint":            "微信官方档案接口调用失败，以下展示的是本系统已落库的档案与授权时的权限集快照。常见原因: 授权已过期或被取消、第三方平台 component_access_token 异常、网络不通。",
+			})
 			return
 		}
 
@@ -237,31 +250,82 @@ func (h *AccountHandler) GetAuthorizerDetail(c *gin.Context) {
 		if info.HeadImg != "" && account.AvatarURL != info.HeadImg {
 			updates["avatar_url"] = info.HeadImg
 		}
-		if info.QRCodeURL != "" {
+		if info.QRCodeURL != "" && account.QRCodeURL != info.QRCodeURL {
 			updates["qrcode_url"] = info.QRCodeURL
 		}
 		if info.Signature != "" && account.Description == "" {
 			updates["description"] = info.Signature
 		}
+		if len(detail.AuthorizationInfo.FuncInfo) > 0 {
+			if b, e := json.Marshal(detail.AuthorizationInfo.FuncInfo); e == nil && string(b) != account.FuncInfo {
+				updates["func_info"] = string(b)
+			}
+		}
 		if len(updates) > 0 {
 			database.DB.Model(&account).Updates(updates)
+			if v, ok := updates["name"]; ok {
+				account.Name = v.(string)
+			}
+			if v, ok := updates["original_id"]; ok {
+				account.OriginalID = v.(string)
+			}
+			if v, ok := updates["avatar_url"]; ok {
+				account.AvatarURL = v.(string)
+			}
+			if v, ok := updates["qrcode_url"]; ok {
+				account.QRCodeURL = v.(string)
+			}
+			if v, ok := updates["description"]; ok {
+				account.Description = v.(string)
+			}
+			if v, ok := updates["func_info"]; ok {
+				account.FuncInfo = v.(string)
+			}
 		}
+
+		liveFuncInfo := make([]service.AuthorizerFuncInfo, len(detail.AuthorizationInfo.FuncInfo))
+		copy(liveFuncInfo, detail.AuthorizationInfo.FuncInfo)
 
 		Ok(c, gin.H{
 			"account":         account,
 			"authorizer_info": detail.AuthorizerInfo,
-			"func_info":       detail.AuthorizationInfo.FuncInfo,
+			"func_info":       liveFuncInfo,
+			"source":          "wechat_official",
+			"raw":             detail.Raw,
 		})
 		return
 	}
 
-	// 2. 普通直连公众号，返回已有完整信息
+	// 2. 普通直连公众号: 微信未向直连账号开放权威档案接口，返回本系统落库信息
 	Ok(c, gin.H{
-		"account": account,
-		"authorizer_info": gin.H{
-			"nick_name": account.Name,
-			"user_name": account.OriginalID,
-			"signature": account.Description,
-		},
+		"account":         account,
+		"authorizer_info": localAuthorizerInfo(account),
+		"func_info":       storedFuncInfo,
+		"source":          "local",
+		"hint":            "该账号是「直连凭据」接入，微信开放平台的 api_get_authorizer_info 只对第三方平台授权托管的账号返回权威档案。若需微信官方主体全称、认证类型、权限集与账号二维码，请使用「微信扫码一键授权接入」重新托管该公众号。",
 	})
+}
+
+// localAuthorizerInfo 用本系统落库字段拼出可展示的档案信息 (直连账号或官方接口失败时的兜底)
+func localAuthorizerInfo(account model.WxAccount) gin.H {
+	return gin.H{
+		"nick_name":  account.Name,
+		"head_img":   account.AvatarURL,
+		"user_name":  account.OriginalID,
+		"signature":  account.Description,
+		"qrcode_url": account.QRCodeURL,
+		"alias":      "",
+	}
+}
+
+// parseStoredFuncInfo 解析授权时落库的 func_info JSON，失败时返回空列表
+func parseStoredFuncInfo(raw string) []service.AuthorizerFuncInfo {
+	if strings.TrimSpace(raw) == "" {
+		return []service.AuthorizerFuncInfo{}
+	}
+	var list []service.AuthorizerFuncInfo
+	if err := json.Unmarshal([]byte(raw), &list); err != nil {
+		return []service.AuthorizerFuncInfo{}
+	}
+	return list
 }
