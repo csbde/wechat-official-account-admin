@@ -29,14 +29,14 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 	r.Use(otelgin.Middleware(cfg.Telemetry.ServiceName))
 	r.Use(middleware.RequestAudit())
 
-	// 媒体文件本地磁盘服务 (本地上传和微信下载的媒体资源)
+	// 媒体文件本地磁盘服务
 	r.Static("/files/upload-image", "./files/upload-image")
 	r.Static("/files/wx-download-media", "./files/wx-download-media")
 
 	// Swagger API 文档
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
-	// 微信服务器回调网关 (无需 JWT，微信直连接入)
+	// 1. 微信普通公众号回调网关 (微信直连，无需 JWT)
 	gatewayHandler := &handler.GatewayHandler{}
 	wxmp := r.Group("/wxmp")
 	{
@@ -44,7 +44,17 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 		wxmp.POST("/:appid/handler", gatewayHandler.ReceiveMessage)
 	}
 
-	// 业务 RESTful API 分组
+	// 2. 微信开放平台-第三方平台网关 (微信直连，无需 JWT)
+	openHandler := &handler.OpenComponentHandler{}
+	openGate := r.Group("/open")
+	{
+		// 授权事件接收 URL
+		openGate.POST("/component/notify", openHandler.ReceiveAuthNotify)
+		// 代公众号接收消息与事件 URL
+		openGate.POST("/component/:appid/callback", openHandler.ReceiveAppMsgCallback)
+	}
+
+	// 3. 业务 RESTful API 分组
 	api := r.Group("/api")
 
 	authHandler := &handler.AuthHandler{}
@@ -59,7 +69,7 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 	api.GET("/system/public-ip", systemHandler.PublicIP)
 	api.GET("/system/health", systemHandler.HealthCheck)
 
-	// 受保护的 API 接口 (需 JWT + Casbin 鉴权)
+	// 受保护的 API 接口 (需 JWT + Casbin 鉴权，支持多租户隔离)
 	protected := api.Group("")
 	protected.Use(middleware.JWTAuth())
 	protected.Use(middleware.CasbinEnforcer())
@@ -68,7 +78,13 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 		protected.GET("/auth/userinfo", authHandler.UserInfo)
 		protected.POST("/auth/logout", authHandler.Logout)
 
-		// 公众号管理
+		// 微信开放平台第三方平台配置与授权
+		protected.GET("/open/component", openHandler.GetComponent)
+		protected.POST("/open/component", openHandler.SaveComponent)
+		protected.GET("/open/auth-url", openHandler.GetAuthURL)
+		protected.GET("/open/auth-callback", openHandler.AuthCallback)
+
+		// 公众号管理 (租户隔离)
 		accountHandler := &handler.AccountHandler{}
 		protected.GET("/accounts", accountHandler.List)
 		protected.POST("/accounts", accountHandler.Create)
@@ -76,7 +92,7 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 		protected.DELETE("/accounts/:id", accountHandler.Delete)
 		protected.POST("/accounts/:id/set-default", accountHandler.SetDefault)
 
-		// 系统用户与日志管理
+		// 系统用户与日志管理 (租户隔离)
 		logHandler := &handler.LogHandler{}
 		protected.GET("/logs", logHandler.List)
 		protected.GET("/system/users", systemHandler.UserList)
@@ -84,7 +100,7 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 		protected.PUT("/system/users/:id", systemHandler.UpdateUser)
 		protected.DELETE("/system/users/:id", systemHandler.DeleteUser)
 
-		// 微信业务相关接口 (必须携带 AppID)
+		// 微信业务相关接口 (必须携带 AppID，且经由 TenantAppID 严格防越权校验)
 		tenant := protected.Group("")
 		tenant.Use(middleware.TenantAppID(true))
 		{
@@ -130,30 +146,24 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 		}
 	}
 
-	// 嵌入式前端 SPA (使用 Go 官方 embed.FS 实现单文件分发)
+	// 嵌入式前端 SPA
 	if frontendFS != nil {
 		distSub, err := fs.Sub(frontendFS, "wechat-official-account-admin-fe/dist")
 		if err == nil {
 			indexHTML, _ := fs.ReadFile(distSub, "index.html")
-
-			// 静态资源文件处理器 (js, css, images, fonts 等)
 			fileServer := http.FileServer(http.FS(distSub))
 
-			// 全局未匹配路由处理 (优先匹配静态资源，其余路由回退到 index.html 支持 SPA 前端路由)
 			r.NoRoute(func(c *gin.Context) {
 				path := strings.TrimPrefix(c.Request.URL.Path, "/")
 
-				// API / 微信 / Swagger 未找到返回 404
-				if strings.HasPrefix(path, "api/") || strings.HasPrefix(path, "wxmp/") || strings.HasPrefix(path, "swagger/") {
+				if strings.HasPrefix(path, "api/") || strings.HasPrefix(path, "wxmp/") || strings.HasPrefix(path, "open/") || strings.HasPrefix(path, "swagger/") {
 					c.JSON(http.StatusNotFound, gin.H{"code": 404, "message": "API not found"})
 					return
 				}
 
-				// 检查 dist 中是否存在该静态文件 (如 assets/index-xxx.js)
 				if path != "" {
 					if file, err := distSub.Open(path); err == nil {
 						_ = file.Close()
-						// 确保正确的 Content-Type
 						ext := filepath.Ext(path)
 						if ctype := mime.TypeByExtension(ext); ctype != "" {
 							c.Header("Content-Type", ctype)
@@ -163,7 +173,6 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 					}
 				}
 
-				// 其余所有前端页面路径均返回 index.html
 				if len(indexHTML) > 0 {
 					c.Data(http.StatusOK, "text/html; charset=utf-8", indexHTML)
 					return

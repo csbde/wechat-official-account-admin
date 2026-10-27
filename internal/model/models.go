@@ -10,9 +10,9 @@ import (
 type Tenant struct {
 	ID          uint           `gorm:"primaryKey" json:"id"`
 	Name        string         `gorm:"size:128;not null" json:"name"`
-	Code        string         `gorm:"size:64;uniqueIndex;not null" json:"code"` // 租户唯一标识
+	Code        string         `gorm:"size:64;uniqueIndex;not null" json:"code"`
 	Description string         `gorm:"size:255" json:"description"`
-	Status      int            `gorm:"default:1" json:"status"` // 1: 启用, 0: 禁用
+	Status      int            `gorm:"default:1" json:"status"`
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
 	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
@@ -21,13 +21,13 @@ type Tenant struct {
 // User 系统管理员及后台用户 (多租户隔离)
 type User struct {
 	ID          uint           `gorm:"primaryKey" json:"id"`
-	TenantID    uint           `gorm:"index;not null;default:1" json:"tenant_id"` // 所属租户
-	Username    string         `gorm:"size:64;not null" json:"username"`          // 同一租户下唯一
+	TenantID    uint           `gorm:"index;not null;default:1" json:"tenant_id"`
+	Username    string         `gorm:"size:64;not null" json:"username"`
 	Password    string         `gorm:"size:255;not null" json:"-"`
 	Nickname    string         `gorm:"size:64" json:"nickname"`
 	Avatar      string         `gorm:"size:255" json:"avatar"`
-	Role        string         `gorm:"size:32;default:'operator'" json:"role"` // superadmin, admin, operator
-	Status      int            `gorm:"default:1" json:"status"`                // 1: 正常, 0: 禁用
+	Role        string         `gorm:"size:32;default:'operator'" json:"role"`
+	Status      int            `gorm:"default:1" json:"status"`
 	SSOProvider string         `gorm:"size:32" json:"sso_provider,omitempty"`
 	SSOUID      string         `gorm:"size:128;index" json:"sso_uid,omitempty"`
 	CreatedAt   time.Time      `json:"created_at"`
@@ -35,32 +35,55 @@ type User struct {
 	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
-// WxAccount 微信公众号主体凭证及配置 (多租户隔离)
-type WxAccount struct {
-	ID             uint           `gorm:"primaryKey" json:"id"`
-	TenantID       uint           `gorm:"index;not null;default:1" json:"tenant_id"` // 强制多租户隔离
-	Name           string         `gorm:"size:100;not null" json:"name"`
-	AppID          string         `gorm:"size:64;not null" json:"appid"`
-	AppSecret      string         `gorm:"size:128;not null" json:"appsecret"`
-	Token          string         `gorm:"size:128" json:"token"`
-	EncodingAESKey string         `gorm:"size:128" json:"encoding_aes_key"`
-	OriginalID     string         `gorm:"size:64" json:"original_id"`
-	QRCodeURL      string         `gorm:"size:255" json:"qrcode_url"`
-	AvatarURL      string         `gorm:"size:255" json:"avatar_url"`
-	Enabled        bool           `gorm:"default:true" json:"enabled"`
-	IsDefault      bool           `gorm:"default:false" json:"is_default"`
-	Description    string         `gorm:"size:255" json:"description"`
-	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
-	DeletedAt      gorm.DeletedAt `gorm:"index" json:"-"`
+// WxOpenComponent 微信开放平台-第三方平台凭证与配置
+type WxOpenComponent struct {
+	ID                  uint           `gorm:"primaryKey" json:"id"`
+	TenantID            uint           `gorm:"index;not null;default:1" json:"tenant_id"` // 多租户隔离
+	Name                string         `gorm:"size:128;not null" json:"name"`
+	ComponentAppID      string         `gorm:"size:64;not null;index" json:"component_appid"`
+	ComponentAppSecret  string         `gorm:"size:128;not null" json:"component_appsecret"`
+	Token               string         `gorm:"size:128;not null" json:"token"`
+	EncodingAESKey      string         `gorm:"size:128;not null" json:"encoding_aes_key"`
+	VerifyTicket        string         `gorm:"size:255" json:"verify_ticket"`
+	TicketUpdatedAt     *time.Time     `json:"ticket_updated_at"`
+	AccessToken         string         `gorm:"size:512" json:"access_token,omitempty"`
+	AccessTokenExpireAt *time.Time     `json:"access_token_expire_at,omitempty"`
+	Enabled             bool           `gorm:"default:true" json:"enabled"`
+	CreatedAt           time.Time      `json:"created_at"`
+	UpdatedAt           time.Time      `json:"updated_at"`
+	DeletedAt           gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
-// WxMenu 微信公众号菜单数据 (多租户隔离)
+// WxAccount 微信公众号主体凭证及配置 (支持直连与开放平台第三方授权)
+type WxAccount struct {
+	ID                     uint           `gorm:"primaryKey" json:"id"`
+	TenantID               uint           `gorm:"index;not null;default:1" json:"tenant_id"`
+	Name                   string         `gorm:"size:100;not null" json:"name"`
+	AppID                  string         `gorm:"size:64;not null;index" json:"appid"`
+	AppSecret              string         `gorm:"size:128" json:"appsecret"` // 授权接入时可为空
+	Token                  string         `gorm:"size:128" json:"token"`
+	EncodingAESKey         string         `gorm:"size:128" json:"encoding_aes_key"`
+	OriginalID             string         `gorm:"size:64" json:"original_id"`
+	QRCodeURL              string         `gorm:"size:255" json:"qrcode_url"`
+	AvatarURL              string         `gorm:"size:255" json:"avatar_url"`
+	AccountType            string         `gorm:"size:32;default:'direct'" json:"account_type"` // direct: 直接配置, authorized: 第三方平台扫码授权代管
+	ComponentAppID         string         `gorm:"size:64;index" json:"component_appid,omitempty"`
+	AuthorizerRefreshToken string         `gorm:"size:255" json:"authorizer_refresh_token,omitempty"`
+	FuncInfo               string         `gorm:"type:text" json:"func_info,omitempty"` // 授权的功能权限列表 JSON
+	Enabled                bool           `gorm:"default:true" json:"enabled"`
+	IsDefault              bool           `gorm:"default:false" json:"is_default"`
+	Description            string         `gorm:"size:255" json:"description"`
+	CreatedAt              time.Time      `json:"created_at"`
+	UpdatedAt              time.Time      `json:"updated_at"`
+	DeletedAt              gorm.DeletedAt `gorm:"index" json:"-"`
+}
+
+// WxMenu 微信公众号菜单数据
 type WxMenu struct {
 	ID          uint           `gorm:"primaryKey" json:"id"`
 	TenantID    uint           `gorm:"index;not null;default:1" json:"tenant_id"`
 	AppID       string         `gorm:"size:64;index;not null" json:"appid"`
-	MenuType    string         `gorm:"size:32;default:'normal'" json:"menu_type"` // normal, conditional
+	MenuType    string         `gorm:"size:32;default:'normal'" json:"menu_type"`
 	MenuID      string         `gorm:"size:64" json:"menu_id"`
 	Name        string         `gorm:"size:128" json:"name"`
 	MenuData    string         `gorm:"type:text" json:"menu_data"`
@@ -72,7 +95,7 @@ type WxMenu struct {
 	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
-// WxMaterial 微信多媒体素材 (多租户隔离)
+// WxMaterial 微信多媒体素材
 type WxMaterial struct {
 	ID            uint           `gorm:"primaryKey" json:"id"`
 	TenantID      uint           `gorm:"index;not null;default:1" json:"tenant_id"`
@@ -90,7 +113,7 @@ type WxMaterial struct {
 	DeletedAt     gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
-// WxAutoReply 智能自动回复规则 (多租户隔离)
+// WxAutoReply 智能自动回复规则
 type WxAutoReply struct {
 	ID        uint           `gorm:"primaryKey" json:"id"`
 	TenantID  uint           `gorm:"index;not null;default:1" json:"tenant_id"`
@@ -107,7 +130,7 @@ type WxAutoReply struct {
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
-// WxFan 微信关注粉丝用户 (多租户隔离)
+// WxFan 微信关注粉丝用户
 type WxFan struct {
 	ID             uint           `gorm:"primaryKey" json:"id"`
 	TenantID       uint           `gorm:"index;not null;default:1" json:"tenant_id"`
@@ -130,7 +153,7 @@ type WxFan struct {
 	DeletedAt      gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
-// WxTag 微信粉丝用户标签 (多租户隔离)
+// WxTag 微信粉丝用户标签
 type WxTag struct {
 	ID        uint           `gorm:"primaryKey" json:"id"`
 	TenantID  uint           `gorm:"index;not null;default:1" json:"tenant_id"`
@@ -143,7 +166,7 @@ type WxTag struct {
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
-// WxQrcode 带参二维码 (多租户隔离)
+// WxQrcode 带参二维码
 type WxQrcode struct {
 	ID            uint           `gorm:"primaryKey" json:"id"`
 	TenantID      uint           `gorm:"index;not null;default:1" json:"tenant_id"`
@@ -162,7 +185,7 @@ type WxQrcode struct {
 	DeletedAt     gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
-// RequestLog API 请求审计日志 (多租户隔离)
+// RequestLog API 请求审计日志
 type RequestLog struct {
 	ID           uint      `gorm:"primaryKey" json:"id"`
 	TenantID     uint      `gorm:"index;default:1" json:"tenant_id"`
@@ -178,11 +201,12 @@ type RequestLog struct {
 	CreatedAt    time.Time `gorm:"index" json:"created_at"`
 }
 
-// AutoMigrate 执行所有多租户实体的数据库自动迁移
+// AutoMigrate 执行所有多租户与开放平台实体的数据库自动迁移
 func AutoMigrate(db *gorm.DB) error {
 	return db.AutoMigrate(
 		&Tenant{},
 		&User{},
+		&WxOpenComponent{},
 		&WxAccount{},
 		&WxMenu{},
 		&WxMaterial{},

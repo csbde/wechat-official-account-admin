@@ -12,11 +12,12 @@ import (
 
 	"github.com/anchel/wechat-official-account-admin/internal/cache"
 	"github.com/anchel/wechat-official-account-admin/internal/database"
-		"github.com/anchel/wechat-official-account-admin/internal/model"
+	"github.com/anchel/wechat-official-account-admin/internal/model"
 	"github.com/go-resty/resty/v2"
-	)
+)
 
 type WxClient struct {
+	Account   model.WxAccount
 	AppID     string
 	AppSecret string
 	Token     string
@@ -35,6 +36,7 @@ func NewWxClient(appid string) (*WxClient, error) {
 		SetHeader("User-Agent", "woaa-server/2.0")
 
 	return &WxClient{
+		Account:   account,
 		AppID:     account.AppID,
 		AppSecret: account.AppSecret,
 		Token:     account.Token,
@@ -54,8 +56,19 @@ func (w *WxClient) CheckSignature(signature, timestamp, nonce string) bool {
 	return digest == signature
 }
 
-// GetAccessToken 获取微信 AccessToken (优先从 Redis 读取，过期前自动从微信接口换取)
+// GetAccessToken 获取微信 AccessToken (智能适配直连公众号与开放平台第三方代管公众号)
 func (w *WxClient) GetAccessToken(ctx context.Context) (string, error) {
+	// 如果是微信第三方平台代管授权接入
+	if w.Account.AccountType == "authorized" && w.Account.ComponentAppID != "" {
+		return DefaultWxOpenService.RefreshAuthorizerToken(
+			ctx,
+			w.Account.ComponentAppID,
+			w.Account.AppID,
+			w.Account.AuthorizerRefreshToken,
+		)
+	}
+
+	// 否则走普通直连模式
 	cacheKey := fmt.Sprintf("wx:access_token:%s", w.AppID)
 	if cache.RDB != nil {
 		val, err := cache.RDB.Get(ctx, cacheKey).Result()
@@ -237,7 +250,7 @@ func (w *WxClient) CreateQRCode(ctx context.Context, qrcodeType string, sceneID 
 
 	if qrcodeType == "temp" {
 		if expireSeconds <= 0 {
-			expireSeconds = 2592000 // 默认30天
+			expireSeconds = 2592000
 		}
 		body["expire_seconds"] = expireSeconds
 		if sceneStr != "" {

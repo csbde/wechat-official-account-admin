@@ -78,6 +78,14 @@
 
 ---
 
+
+### 9. 微信开放平台 (第三方平台 Component) 接入
+- **免密扫码一键托管**：无需客户公众号提供 AppSecret，客户管理员微信扫码即可将公众号一键委托给本平台代管。
+- **协议端点**：
+  - 授权事件接收 URL: `http://<domain>/open/component/notify`
+  - 代公众号消息事件接收 URL: `http://<domain>/open/component/$APPID$/callback`
+- **支持全自动化运维**：全自动接收并解析 `component_verify_ticket`，自动维持刷新 `authorizer_access_token`，上层菜单、素材、自动回复、粉丝管理等业务代码完全通用无感透明。
+
 ## 🏃 快速启动
 
 ### 1. 运行依赖
