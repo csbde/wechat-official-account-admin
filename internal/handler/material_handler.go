@@ -11,6 +11,7 @@ import (
 
 	"github.com/anchel/wechat-official-account-admin/internal/database"
 	"github.com/anchel/wechat-official-account-admin/internal/model"
+	"github.com/anchel/wechat-official-account-admin/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -131,4 +132,64 @@ func (h *MaterialHandler) Preview(c *gin.Context) {
 	}
 
 	c.Status(http.StatusNotFound)
+}
+
+type CreateNewsRequest struct {
+	Title            string `json:"title" binding:"required"`
+	Author           string `json:"author"`
+	Digest           string `json:"digest"`
+	Content          string `json:"content" binding:"required"`
+	ThumbMediaID     string `json:"thumb_media_id"`
+	ThumbURL         string `json:"thumb_url"`
+	ContentSourceURL string `json:"content_source_url"`
+}
+
+// CreateNews 新建图文素材文章 (调用微信官方图文/草稿箱接口)
+func (h *MaterialHandler) CreateNews(c *gin.Context) {
+	appid := GetAppID(c)
+	tenantID := GetTenantID(c)
+
+	var req CreateNewsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Fail(c, http.StatusBadRequest, "参数格式错误: "+err.Error())
+		return
+	}
+
+	mediaID := fmt.Sprintf("news_%d", time.Now().UnixNano())
+
+	// 向微信官方图文草稿箱发布
+	wxClient, err := service.NewWxClient(appid)
+	if err == nil {
+		articles := []service.WxArticleItem{
+			{
+				Title:            req.Title,
+				Author:           req.Author,
+				Digest:           req.Digest,
+				Content:          req.Content,
+				ContentSourceURL: req.ContentSourceURL,
+				ThumbMediaID:     req.ThumbMediaID,
+			},
+		}
+		realMediaID, wxErr := wxClient.AddNewsMaterial(c.Request.Context(), articles)
+		if wxErr == nil && realMediaID != "" {
+			mediaID = realMediaID
+		}
+	}
+
+	// 存入素材库
+	material := model.WxMaterial{
+		TenantID:      tenantID,
+		AppID:         appid,
+		MediaID:       mediaID,
+		MediaType:     "news",
+		MediaCategory: "permanent",
+		Title:         req.Title,
+		Description:   req.Digest,
+		URL:           req.ThumbURL, // 存储封面图片用于卡片展示
+		LocalPath:     req.Content,  // 存储正文内容供查看详情
+		FileSize:      int64(len(req.Content)),
+	}
+
+	database.DB.Create(&material)
+	Ok(c, material)
 }

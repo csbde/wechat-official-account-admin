@@ -195,6 +195,7 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 			materialHandler := &handler.MaterialHandler{}
 			tenant.GET("/materials", materialHandler.List)
 			tenant.POST("/materials/upload", materialHandler.Upload)
+			tenant.POST("/materials/news", materialHandler.CreateNews)
 			tenant.DELETE("/materials/:id", materialHandler.Delete)
 			tenant.GET("/materials/:id/preview", materialHandler.Preview)
 

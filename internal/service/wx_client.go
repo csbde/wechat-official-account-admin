@@ -565,3 +565,62 @@ func (w *WxClient) BatchUntaggingMembers(ctx context.Context, tagID int, openIDs
 
 	return nil
 }
+
+type WxArticleItem struct {
+	Title            string `json:"title"`
+	Author           string `json:"author"`
+	Digest           string `json:"digest"`
+	Content          string `json:"content"`
+	ContentSourceURL string `json:"content_source_url"`
+	ThumbMediaID     string `json:"thumb_media_id"`
+	NeedOpenComment  int    `json:"need_open_comment,omitempty"`
+	OnlyFansCanComment int  `json:"only_fans_can_comment,omitempty"`
+}
+
+// AddNewsMaterial 添加图文素材 (新增草稿箱/永久图文文章)
+func (w *WxClient) AddNewsMaterial(ctx context.Context, articles []WxArticleItem) (string, error) {
+	token, err := w.GetAccessToken(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	// 优先调用微信官方草稿箱接口 cgi-bin/draft/add
+	apiURL := fmt.Sprintf("https://api.weixin.qq.com/cgi-bin/draft/add?access_token=%s", token)
+	payload := map[string]interface{}{
+		"articles": articles,
+	}
+
+	resp, err := w.http.R().SetContext(ctx).SetBody(payload).Post(apiURL)
+	if err != nil {
+		return "", fmt.Errorf("调用微信图文接口失败: %w", err)
+	}
+
+	var res struct {
+		MediaID string `json:"media_id"`
+		Errcode int    `json:"errcode"`
+		Errmsg  string `json:"errmsg"`
+	}
+	if err := json.Unmarshal(resp.Body(), &res); err != nil {
+		return "", fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	// 若草稿箱报错，尝试兼容旧版 material/add_news
+	if res.Errcode != 0 {
+		oldURL := fmt.Sprintf("https://api.weixin.qq.com/cgi-bin/material/add_news?access_token=%s", token)
+		oldResp, oldErr := w.http.R().SetContext(ctx).SetBody(payload).Post(oldURL)
+		if oldErr == nil {
+			var oldRes struct {
+				MediaID string `json:"media_id"`
+				Errcode int    `json:"errcode"`
+				Errmsg  string `json:"errmsg"`
+			}
+			_ = json.Unmarshal(oldResp.Body(), &oldRes)
+			if oldRes.Errcode == 0 && oldRes.MediaID != "" {
+				return oldRes.MediaID, nil
+			}
+		}
+		return "", fmt.Errorf("[%d] %s", res.Errcode, res.Errmsg)
+	}
+
+	return res.MediaID, nil
+}
