@@ -236,7 +236,7 @@ func (s *OIDCService) HandleCallback(ctx context.Context, code, host string) (*m
 			Email:      oidcUser.Email,
 			Password:   string(hash),
 			Nickname:   nickname,
-			Role:       "operator",
+			Role:       "admin", // OIDC 企业登录用户默认享有租户管理员完整权限 (租户行级隔离保护)
 			Status:     1,
 			OIDCIssuer: cfg.Issuer,
 			OIDCSub:    oidcUser.Sub,

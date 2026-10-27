@@ -67,8 +67,8 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentTab, onTabChange, c
     { id: 'fans', label: '粉丝与标签', icon: Users, requiresApp: true },
     { id: 'qrcode', label: '带参二维码', icon: QrCode, requiresApp: true },
     { id: 'logs', label: '请求与追踪日志', icon: FileText },
-    { id: 'system', label: '系统与权限', icon: Settings },
-  ]
+    { id: 'system', label: '系统与权限', icon: Settings, adminOnly: true },
+  ].filter(item => !item.adminOnly || user?.role === 'admin' || user?.role === 'superadmin')
 
   return (
     <div className="flex min-h-screen bg-background text-foreground">
