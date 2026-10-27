@@ -135,7 +135,7 @@ func (h *FanHandler) GetTags(c *gin.Context) {
 	Ok(c, list)
 }
 
-// CreateTag 新建粉丝标签 (绑定租户)
+// CreateTag 新建粉丝标签 (优先向微信官方创建以拿到真实 tag_id，失败时退化为本地标签并明确提示)
 func (h *FanHandler) CreateTag(c *gin.Context) {
 	appid := GetAppID(c)
 	tenantID := GetTenantID(c)
@@ -147,10 +147,21 @@ func (h *FanHandler) CreateTag(c *gin.Context) {
 		return
 	}
 
-	var maxTag model.WxTag
-	tagID := 100
-	if err := database.DB.Where("app_id = ? AND tenant_id = ?", appid, tenantID).Order("tag_id desc").First(&maxTag).Error; err == nil {
-		tagID = maxTag.TagID + 1
+	// 「按标签群发」与微信侧批量打标签都依赖微信分配的真实 tag_id，因此优先向官方创建
+	tagID := 0
+	synced := false
+	if wxClient, err := service.NewWxClient(appid); err == nil {
+		if id, werr := wxClient.CreateWxTag(c.Request.Context(), req.Name); werr == nil && id > 0 {
+			tagID = id
+			synced = true
+		}
+	}
+	if !synced {
+		var maxTag model.WxTag
+		tagID = 100
+		if err := database.DB.Where("app_id = ? AND tenant_id = ?", appid, tenantID).Order("tag_id desc").First(&maxTag).Error; err == nil {
+			tagID = maxTag.TagID + 1
+		}
 	}
 
 	tag := model.WxTag{
@@ -162,7 +173,11 @@ func (h *FanHandler) CreateTag(c *gin.Context) {
 	}
 	database.DB.Create(&tag)
 
-	Ok(c, tag)
+	msg := "标签已创建并同步至微信官方"
+	if !synced {
+		msg = "标签仅在本地创建 (微信官方创建失败)，按标签群发需要真实 tag_id，请检查账号凭据后重试"
+	}
+	Ok(c, gin.H{"tag": tag, "synced": synced, "message": msg})
 }
 
 // DeleteTag 删除粉丝标签 (防越权校验)

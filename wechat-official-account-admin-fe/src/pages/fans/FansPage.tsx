@@ -135,11 +135,15 @@ export const FansPage: React.FC = () => {
     },
   })
 
-  // 创建新标签 (向微信官方同步创建)
+  // 创建新标签 (优先向微信官方同步创建，失败时退化为本地标签并提示)
   const createTagMutation = useMutation({
     mutationFn: (name: string) => api.post('/api/fans/tags', { name }),
-    onSuccess: () => {
-      toast.success('微信标签创建成功并同步至官方！')
+    onSuccess: (d: any) => {
+      if (d?.synced) {
+        toast.success(`微信标签创建成功并同步至官方 (tag_id=${d?.tag?.tag_id})`)
+      } else {
+        toast.warning(d?.message || '标签仅在本地创建，未同步至微信官方', { duration: 6000 })
+      }
       queryClient.invalidateQueries({ queryKey: ['fans-tags'] })
       setNewTagName('')
     },

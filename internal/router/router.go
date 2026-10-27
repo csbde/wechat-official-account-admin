@@ -288,6 +288,23 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 			tenant.POST("/notify/sub/templates/delete", notifyHandler.SubDeleteTemplate)
 			tenant.POST("/notify/sub/send", notifyHandler.SubSend)
 			tenant.POST("/notify/sub/bizsend", notifyHandler.SubBizSend)
+
+			// 公众号群发消息 (按 openid / 按标签或全体 / 预览 / 状态查询 / 删除 / 速度)
+			massHandler := &handler.MassHandler{}
+			tenant.POST("/notify/mass/send", massHandler.Send)
+			tenant.POST("/notify/mass/sendall", massHandler.SendAll)
+			tenant.POST("/notify/mass/preview", massHandler.Preview)
+			tenant.POST("/notify/mass/status", massHandler.Status)
+			tenant.POST("/notify/mass/delete", massHandler.Delete)
+			tenant.GET("/notify/mass/speed", massHandler.GetSpeed)
+			tenant.POST("/notify/mass/speed", massHandler.SetSpeed)
+			tenant.POST("/notify/mass/uploadimg", massHandler.UploadNewsImage)
+			tenant.POST("/notify/mass/uploadnews", massHandler.UploadNews)
+			tenant.POST("/notify/mass/uploadthumb", massHandler.UploadThumb)
+
+			// 服务提醒卡片 (订阅消息·服务卡片，小程序/服务号)
+			tenant.POST("/notify/sub/service-card", massHandler.SetServiceCard)
+			tenant.POST("/notify/sub/service-card/query", massHandler.GetServiceCard)
 		}
 	}
 

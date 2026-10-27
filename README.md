@@ -125,10 +125,20 @@
 
 
 15. **模板消息与订阅消息 (Template & Subscribe Message)**:
-    - 侧边栏「模板与订阅消息」页面，随顶部账号切换自动携带 `X-App-ID` 并由租户中间件鉴权。
+    - 侧边栏「群发与模板消息」页面，随顶部账号切换自动携带 `X-App-ID` 并由租户中间件鉴权。
     - **公众号模板消息**：查询/设置所属行业 (`template/get_industry`、`api_set_industry`)、从公共模板库选用模板 (`api_add_template`，支持指定关键词组合)、查看与删除我的模板库 (`get_all_private_template`、`del_private_template`)、发送模板消息 (`message/template/send`，支持 `url`、跳转小程序 `miniprogram`、防重入 `client_msg_id` 与字体颜色)、一次性订阅下发 (`message/template/subscribe`)、查询被拦截的模板消息 (`wxa/sec/queryblocktmplmsg`)。
     - **订阅消息 (小程序 · 服务号)**：拉取类目 (`wxaapi/newtmpl/getcategory`) → 分页浏览公共模板库 (`getpubtemplatetitles`) → 查看关键词 (`getpubtemplatekeywords`) → 勾选 2~5 个关键词加入我的模板库 (`addtemplate` 返回 `priTmplId`) → 我的订阅模板列表与删除 (`gettemplate`、`deltemplate`) → 发送 (`message/subscribe/send`，可选 `formal/trial/developer` 版本与跳转页) 或服务号一次性订阅下发 (`message/subscribe/bizsend`)。
     - **智能表单**：自动解析模板 `content` 中的 `{{xxx.DATA}}` 占位，动态生成关键词输入框，并以模板 `example` 作为填写示例，避免 47003 (参数格式不符) 类错误。
+
+16. **群发消息与服务提醒卡片 (Mass Messaging & Service Card)**:
+    - 同页面新增「群发消息」「服务提醒卡片」两个标签页，接口统一位于 `/api/notify/mass/*` 与 `/api/notify/sub/service-card*`，全部经过 `TenantAppID` 租户校验 (跨租户 appid 直接 403)，参数类错误返回 400、微信侧错误返回 500。
+    - **群发内容**：支持 `text` / `mpnews` (图文) / `image` (贴图，多张 `media_ids`) / `voice` / `mpvideo` / `wxcard` 六类消息，扁平化入参由后端组装微信要求的结构，并附带 `clientmsgid` (24 小时内防重复群发) 与 `send_ignore_reprint` (原创转载策略)。
+    - **接收者三选一**：全部用户 (`sendall` + `is_to_all=true`)、指定粉丝标签 (`sendall` + `tag_id`，标签下拉来自「粉丝与标签管理」)、指定 openid 列表 (`send`，2~10000 个，支持多行粘贴或从粉丝列表点选)；另提供 `preview` 预览接口 (`touser` 或 `towxname` 微信号预览，不占用群发次数)。
+    - **任务管理**：`message/mass/get` 按 `msg_id` 查询发送状态 (`SEND_SUCCESS`/`SENDING`/`SEND_FAIL`/`DELETE` 中文化展示)、`message/mass/delete` 按 `msg_id` 或图文 `url` + `article_idx` 撤回未发送内容、`message/mass/speed/get|set` 查看与设置群发速率档位 (0=80 万/分 ~ 4=10 万/分)。
+    - **图文素材准备 (群发前置)**：`media/uploadimg` 上传图文正文图片并直接返回可用 URL (不占用素材库配额)、`material/add_material?type=image` 上传永久图片素材返回真实 `thumb_media_id`、`media/uploadnews` 一键新建图文素材并回填群发所需的 `media_id`，彻底解决"素材型图文群发没有 media_id"的断链问题。
+    - **服务提醒卡片**：`wxa/set_user_notify` 激活与更新卡片 (`notify_type` + `notify_code` + `content_json`，微信支付订单号作 code 时可填 `check_json`)，`wxa/get_user_notify` 查询卡片状态 (`code_state` 0 正常 / 1 有风险 / 2 异常 / 10 用户拒收) 并可一键回填上次推送内容；内置 1001、2001 卡片示例便于快速联调。
+    - **频次与资质提示**：订阅号每天 1 次、认证服务号每月 4 次群发 (超出返回 44004)；第三方平台代群发需勾选权限集 **id=7**，素材上传需 **id=11 或 100**，服务卡片需权限集 **id=18** (详见下文「权限集勾选清单」)；若账号开启「API 群发保护」，群发全部用户需管理员在 30 分钟内确认。
+    - **粉丝标签同步修正**：新建标签现在会真实调用 `cgi-bin/tags/create` 取回微信分配的 `tag_id` 后再落库 (官方创建失败则拒绝保存本地假标签)，保证批量打标签与「按标签群发」可用。
 
 ---
 
@@ -384,6 +394,12 @@ server {
    - **代开发公众号消息与事件接收 URL**: `https://wechat.yourdomain.com/open/component/$APPID$/callback`
 3. 在本平台进入「公众号管理」->「开放平台第三方设置」，填入上述第三方平台凭证保存。
 4. 点击「微信扫码一键授权接入」，微信管理员微信扫码即可一键授权托管，公众号自动同步至平台，无需维护 AppSecret！
+5. **权限集勾选清单** (授权时决定哪些能力可代调用，缺项会导致对应页面报 `48001 api unauthorized`)，以下 ID 均取自微信官方各接口页的「该接口所属的权限集 id」：
+   - 群发消息 (`cgi-bin/message/mass/send`、`sendall`、`get`、`delete`、`preview`、`speed/*`)：**id=7**
+   - 群发图文与素材 (`media/uploadnews`、`material/add_material`)：**id=1、7、8、9、11、100** 中任一 (建议同时勾选 7 与 11)
+   - 图文正文图片 (`media/uploadimg`)：**id=1、8、9、11、18、37、100** 中任一
+   - 服务提醒卡片 (`wxa/set_user_notify`、`wxa/get_user_notify`)：**id=18**
+   - 自定义菜单、粉丝与标签、带参二维码等按对应页面提示补齐
 
 ---
 

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -370,4 +371,67 @@ func ExtractTemplateKeywords(content string) []string {
 		}
 	}
 	return out
+}
+
+// ---------------------------- 服务提醒卡片 (订阅消息·服务卡片) ----------------------------
+// 官方文档: /miniprogram/dev/framework/open-ability/subscribe-message-2
+// 接口: wxa/set_user_notify (激活与更新) / wxa/get_user_notify (查询状态)
+// 第三方代调用权限集 id = 18，可使用 authorizer_access_token
+
+// GetServiceCard 查询用户服务卡片状态 (wxa/get_user_notify)
+// code_state: 0 正常 / 1 有风险 / 2 异常 / 10 用户拒收本次 code
+func (s *WxNotifyService) GetServiceCard(ctx context.Context, appid, openid, notifyCode string, notifyType int) (map[string]interface{}, error) {
+	if strings.TrimSpace(openid) == "" {
+		return nil, fmt.Errorf("%w: 请填写用户 openid", ErrInvalidParam)
+	}
+	if strings.TrimSpace(notifyCode) == "" {
+		return nil, fmt.Errorf("%w: 请填写动态更新令牌 notify_code", ErrInvalidParam)
+	}
+	if notifyType <= 0 {
+		return nil, fmt.Errorf("%w: 请填写正确的卡片 id (notify_type)，具体取值与字段见官方「服务提醒」卡片定义", ErrInvalidParam)
+	}
+	body := map[string]interface{}{
+		"openid":      strings.TrimSpace(openid),
+		"notify_code": strings.TrimSpace(notifyCode),
+		"notify_type": notifyType,
+	}
+	var res map[string]interface{}
+	if err := s.do(ctx, appid, "POST", "/wxa/get_user_notify", nil, body, &res); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// SetServiceCard 激活或更新用户服务卡片 (wxa/set_user_notify)
+// contentJSON 为卡片状态 JSON 字符串 (不同卡片字段不同)；checkJSON 仅在使用微信支付订单号作为 notify_code 时需要
+func (s *WxNotifyService) SetServiceCard(ctx context.Context, appid, openid, notifyCode string, notifyType int, contentJSON, checkJSON string) error {
+	if strings.TrimSpace(openid) == "" {
+		return fmt.Errorf("%w: 请填写用户 openid", ErrInvalidParam)
+	}
+	if strings.TrimSpace(notifyCode) == "" {
+		return fmt.Errorf("%w: 请填写动态更新令牌 notify_code (前端 button 获取或微信支付订单号)", ErrInvalidParam)
+	}
+	if notifyType <= 0 {
+		return fmt.Errorf("%w: 请填写正确的卡片 id (notify_type)", ErrInvalidParam)
+	}
+	content := strings.TrimSpace(contentJSON)
+	if content == "" {
+		return fmt.Errorf("%w: 请填写卡片内容 content_json，例如 {\"cur_status\":2,\"arrival_time\":1679569348}", ErrInvalidParam)
+	}
+	if !json.Valid([]byte(content)) {
+		return fmt.Errorf("%w: content_json 不是合法的 JSON 字符串", ErrInvalidParam)
+	}
+	body := map[string]interface{}{
+		"openid":       strings.TrimSpace(openid),
+		"notify_code":  strings.TrimSpace(notifyCode),
+		"notify_type":  notifyType,
+		"content_json": content,
+	}
+	if v := strings.TrimSpace(checkJSON); v != "" {
+		if !json.Valid([]byte(v)) {
+			return fmt.Errorf("%w: check_json 不是合法的 JSON 字符串", ErrInvalidParam)
+		}
+		body["check_json"] = v
+	}
+	return s.do(ctx, appid, "POST", "/wxa/set_user_notify", nil, body, nil)
 }

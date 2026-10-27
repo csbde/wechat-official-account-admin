@@ -15,9 +15,11 @@ import {
 } from '@/components/ui/dialog'
 import {
   MessageSquare, Send, Trash2, Plus, Library, RefreshCw, ShieldAlert, Bell,
-  FileText, ChevronLeft, ChevronRight, Search,
+  FileText, ChevronLeft, ChevronRight, Search, Megaphone, CreditCard,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { MassPanel } from './MassPanel'
+import { ServiceCardPanel } from './ServiceCardPanel'
 
 /** 解析模板 content 中的 {{key.DATA}} 占位，生成可填写的表单字段 */
 function parseTemplate(content?: string, example?: string) {
@@ -41,7 +43,7 @@ function parseTemplate(content?: string, example?: string) {
 export const NotifyPage: React.FC = () => {
   const queryClient = useQueryClient()
   const { currentApp } = useAppStore()
-  const [tab, setTab] = useState<'oa' | 'sub'>('oa')
+  const [tab, setTab] = useState<'oa' | 'sub' | 'mass' | 'card'>('oa')
 
   /* ============================ 公众号模板消息 ============================ */
   const { data: industry } = useQuery<any>({
@@ -195,7 +197,7 @@ export const NotifyPage: React.FC = () => {
     return (
       <Card>
         <CardContent className="py-16 text-center text-sm text-muted-foreground">
-          请先在右上角选择一个公众号或小程序，再进行模板消息 / 订阅消息管理
+          请先在右上角选择一个公众号或小程序，再进行群发消息 / 模板消息 / 订阅消息管理
         </CardContent>
       </Card>
     )
@@ -207,14 +209,16 @@ export const NotifyPage: React.FC = () => {
         <div>
           <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">
             <Bell className="h-6 w-6 text-primary" />
-            <span>模板消息与订阅消息</span>
+            <span>消息群发与模板消息</span>
           </h2>
           <p className="text-sm text-muted-foreground">
             当前账号：
             <span className="font-semibold text-foreground">{currentApp.name}</span>
             <span className="font-mono text-xs ml-1.5 text-muted-foreground">{currentApp.appid}</span>
             <Badge variant="outline" className="ml-2 text-[10px]">
-              {currentApp.account_type === 'miniprogram' ? '小程序 (订阅消息)' : '公众号 (模板消息/订阅消息)'}
+              {currentApp.account_type === 'miniprogram'
+                ? '小程序 (订阅消息/服务卡片)'
+                : '公众号 (群发/模板消息/订阅消息)'}
             </Badge>
           </p>
         </div>
@@ -225,12 +229,18 @@ export const NotifyPage: React.FC = () => {
       </div>
 
       <Tabs value={tab} onValueChange={(v: any) => setTab(v)}>
-        <TabsList className="grid w-full max-w-md grid-cols-2">
+        <TabsList className="grid w-full max-w-3xl grid-cols-2 md:grid-cols-4">
           <TabsTrigger value="oa" className="text-xs gap-1.5">
             <MessageSquare className="h-3.5 w-3.5 text-emerald-500" />公众号模板消息
           </TabsTrigger>
           <TabsTrigger value="sub" className="text-xs gap-1.5">
             <Bell className="h-3.5 w-3.5 text-violet-500" />订阅消息
+          </TabsTrigger>
+          <TabsTrigger value="mass" className="text-xs gap-1.5">
+            <Megaphone className="h-3.5 w-3.5 text-sky-500" />群发消息
+          </TabsTrigger>
+          <TabsTrigger value="card" className="text-xs gap-1.5">
+            <CreditCard className="h-3.5 w-3.5 text-orange-500" />服务提醒卡片
           </TabsTrigger>
         </TabsList>
 
@@ -547,6 +557,16 @@ export const NotifyPage: React.FC = () => {
               </Table>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* ===================== 群发消息 ===================== */}
+        <TabsContent value="mass" className="mt-6">
+          <MassPanel />
+        </TabsContent>
+
+        {/* ===================== 服务提醒卡片 ===================== */}
+        <TabsContent value="card" className="mt-6">
+          <ServiceCardPanel />
         </TabsContent>
       </Tabs>
 
