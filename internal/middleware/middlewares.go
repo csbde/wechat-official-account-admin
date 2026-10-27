@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,7 +28,7 @@ func CORS() gin.HandlerFunc {
 		}
 		c.Header("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE, UPDATE")
 		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, X-App-ID, X-Tenant-ID")
-		c.Header("Access-Control-Expose-Headers", "Content-Length, Access-Control-Allow-Origin, Access-Control-Allow-Headers, Cache-Control, Content-Language, Content-Type")
+		c.Header("Access-Control-Expose-Headers", "Content-Length, Access-Control-Allow-Origin, Access-Control-Allow-Headers, Cache-Control, Content-Language, Content-Type, X-Tenant-Fallback")
 		c.Header("Access-Control-Allow-Credentials", "true")
 
 		if c.Request.Method == "OPTIONS" {
@@ -140,8 +141,45 @@ func JWTAuth() gin.HandlerFunc {
 		// 将用户基础信息与所属租户放入上下文
 		c.Set("user_id", claims.UserID)
 		c.Set("tenant_id", claims.TenantID)
+		c.Set("home_tenant_id", claims.TenantID)
 		c.Set("username", claims.Username)
 		c.Set("role", claims.Role)
+
+		// 超级管理员可用 X-Tenant-ID 切换"租户视角"，跨租户代运营与排障；
+		// 非超级管理员携带该 Header 一律忽略，且必须校验目标租户存在并已启用，防止越权。
+		if claims.Role == "superadmin" {
+			if raw := strings.TrimSpace(c.GetHeader("X-Tenant-ID")); raw != "" {
+				tid, convErr := strconv.ParseUint(raw, 10, 64)
+				if convErr != nil || tid == 0 {
+					c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "X-Tenant-ID 请求头格式不合法 (需为正整数租户 ID)"})
+					c.Abort()
+					return
+				}
+				var cnt int64
+				database.DB.Model(&model.Tenant{}).Where("id = ? AND status = 1", tid).Count(&cnt)
+				if cnt > 0 {
+					c.Set("tenant_id", uint(tid))
+					if uint(tid) != claims.TenantID {
+						c.Set("tenant_view", true)
+						logger.Warn("Superadmin switched tenant view",
+							zap.Uint("home_tenant_id", claims.TenantID),
+							zap.Uint("view_tenant_id", uint(tid)),
+							zap.String("username", claims.Username),
+						)
+					}
+				} else {
+					// 目标租户已被删除或停用：安全回退到超级管理员本人租户，
+					// 并回写 X-Tenant-Fallback 头，便于前端自动纠正视角、避免卡在不可用视角。
+					logger.Warn("Requested tenant view unavailable, fallback to home tenant",
+						zap.Uint("requested_tenant_id", uint(tid)),
+						zap.Uint("home_tenant_id", claims.TenantID),
+						zap.String("username", claims.Username),
+					)
+					c.Set("tenant_id", claims.TenantID)
+					c.Header("X-Tenant-Fallback", strconv.FormatUint(uint64(claims.TenantID), 10))
+				}
+			}
+		}
 		c.Next()
 	}
 }
@@ -205,26 +243,32 @@ func TenantAppID(required bool) gin.HandlerFunc {
 		roleVal, _ := c.Get("role")
 		role, _ := roleVal.(string)
 
-		// 超级管理员放行；非超级管理员强制核查该 AppID 是否属于该租户
-		if role != "superadmin" {
-			var count int64
-			database.DB.Model(&model.WxAccount{}).
-				Where("app_id = ? AND tenant_id = ?", appid, tenantID).
-				Count(&count)
+		// 所有角色（含超级管理员）一律按“当前租户视角”校验 AppID 归属：
+		// 超级管理员需要操作其他租户时，必须通过 X-Tenant-ID 显式切换视角，留下明确的审计上下文。
+		var count int64
+		database.DB.Model(&model.WxAccount{}).
+			Where("app_id = ? AND tenant_id = ?", appid, tenantID).
+			Count(&count)
 
-			if count == 0 {
-				logger.Warn("Cross-tenant access attempted!",
-					zap.Uint("tenant_id", tenantID),
-					zap.String("appid", appid),
-					zap.String("client_ip", c.ClientIP()),
-				)
-				c.JSON(http.StatusForbidden, gin.H{
-					"code":    403,
-					"message": "越权访问被拒绝：指定微信公众号不属于您所在的租户组织",
-				})
-				c.Abort()
-				return
+		if count == 0 {
+			homeTenantID, _ := c.Get("home_tenant_id")
+			logger.Warn("Cross-tenant access attempted!",
+				zap.Uint("tenant_id", tenantID),
+				zap.Any("home_tenant_id", homeTenantID),
+				zap.String("username", c.GetString("username")),
+				zap.String("appid", appid),
+				zap.String("client_ip", c.ClientIP()),
+			)
+			extra := ""
+			if role == "superadmin" {
+				extra = "（超级管理员请先在顶栏切换到该账号所属租户视角）"
 			}
+			c.JSON(http.StatusForbidden, gin.H{
+				"code":    403,
+				"message": "越权访问被拒绝：指定微信公众号不属于当前租户组织" + extra,
+			})
+			c.Abort()
+			return
 		}
 
 		c.Set("appid", appid)

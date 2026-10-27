@@ -38,9 +38,14 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { formatDate } from '@/lib/utils'
+import { TenantPanel } from './TenantPanel'
+import { useAuthStore } from '@/stores/auth'
 
 export const SystemPage: React.FC = () => {
   const queryClient = useQueryClient()
+  const { user: currentUser } = useAuthStore()
+  const isSuperAdmin = currentUser?.role === 'superadmin'
+  const [viewAllTenants, setViewAllTenants] = useState(false)
 
   // 用户管理状态
   const [userModalOpen, setUserModalOpen] = useState(false)
@@ -50,6 +55,7 @@ export const SystemPage: React.FC = () => {
   const [password, setPassword] = useState('')
   const [nickname, setNickname] = useState('')
   const [role, setRole] = useState('operator')
+  const [userTenantId, setUserTenantId] = useState<number>(0)
 
   // OIDC 配置弹窗状态
   const [oidcModalOpen, setOidcModalOpen] = useState(false)
@@ -61,13 +67,22 @@ export const SystemPage: React.FC = () => {
   const [oidcScopes, setOidcScopes] = useState('openid profile email')
   const [oidcAutoRegister, setOidcAutoRegister] = useState(false)
   const [oidcDefaultRole, setOidcDefaultRole] = useState('operator')
+  const [oidcDefaultTenantId, setOidcDefaultTenantId] = useState<number>(1)
   const [testResult, setTestResult] = useState<any>(null)
   const [testingOIDC, setTestingOIDC] = useState(false)
 
-  // 获取用户列表
+  // 获取用户列表 (超级管理员可切换为跨租户总览)
   const { data: users, isLoading } = useQuery<any[]>({
-    queryKey: ['system-users'],
-    queryFn: () => api.get('/api/system/users'),
+    queryKey: ['system-users', viewAllTenants ? 'all' : 'current'],
+    queryFn: () => api.get('/api/system/users', { params: isSuperAdmin && viewAllTenants ? { all: 1 } : {} }),
+  })
+
+  // 租户下拉选项 (超级管理员分配用户归属租户时使用)
+  const { data: tenantOptions } = useQuery<any[]>({
+    queryKey: ['system-tenant-options'],
+    queryFn: () => api.get('/api/system/tenants/options'),
+    enabled: isSuperAdmin,
+    retry: 0,
   })
 
   // 获取出口公网 IP
@@ -92,6 +107,7 @@ export const SystemPage: React.FC = () => {
       setOidcScopes(oidcConfig.scopes || 'openid profile email')
       setOidcAutoRegister(!!oidcConfig.auto_register)
       setOidcDefaultRole(oidcConfig.default_role || 'operator')
+      setOidcDefaultTenantId(oidcConfig.default_tenant_id || 1)
     }
   }, [oidcConfig])
 
@@ -164,6 +180,7 @@ export const SystemPage: React.FC = () => {
     setPassword('')
     setNickname('')
     setRole('operator')
+    setUserTenantId(currentUser?.tenant_id ?? 1)
     setUserModalOpen(true)
   }
 
@@ -174,6 +191,7 @@ export const SystemPage: React.FC = () => {
     setPassword('')
     setNickname(u.nickname || '')
     setRole(u.role || 'operator')
+    setUserTenantId(u.tenant_id || currentUser?.tenant_id || 1)
     setUserModalOpen(true)
   }
 
@@ -193,6 +211,7 @@ export const SystemPage: React.FC = () => {
       password: password || undefined,
       nickname,
       role,
+      tenant_id: isSuperAdmin ? userTenantId : undefined,
     })
   }
 
@@ -212,18 +231,20 @@ export const SystemPage: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* 配置 OIDC 按钮 */}
-          <Button
-            variant="outline"
-            onClick={() => {
-              setTestResult(null)
-              setOidcModalOpen(true)
-            }}
-            className="gap-1.5 text-xs border-emerald-500/40 text-emerald-600 hover:bg-emerald-500/10 font-medium"
-          >
-            <Fingerprint className="h-4 w-4 text-emerald-600" />
-            <span>配置 OIDC 单点登录</span>
-          </Button>
+          {/* 配置 OIDC 按钮 (系统级 SSO，仅超级管理员可改) */}
+          {isSuperAdmin && (
+            <Button
+              variant="outline"
+              onClick={() => {
+                setTestResult(null)
+                setOidcModalOpen(true)
+              }}
+              className="gap-1.5 text-xs border-emerald-500/40 text-emerald-600 hover:bg-emerald-500/10 font-medium"
+            >
+              <Fingerprint className="h-4 w-4 text-emerald-600" />
+              <span>配置 OIDC 单点登录</span>
+            </Button>
+          )}
 
           <a
             href="/swagger/index.html"
@@ -257,13 +278,17 @@ export const SystemPage: React.FC = () => {
           </CardContent>
         </Card>
 
-        {/* 可点击交互的 OIDC 状态卡片 */}
+        {/* 可点击交互的 OIDC 状态卡片 (非超级管理员只读) */}
         <Card
-          onClick={() => {
-            setTestResult(null)
-            setOidcModalOpen(true)
-          }}
-          className="cursor-pointer hover:border-emerald-500/60 transition-colors group"
+          onClick={
+            isSuperAdmin
+              ? () => {
+                  setTestResult(null)
+                  setOidcModalOpen(true)
+                }
+              : undefined
+          }
+          className={`${isSuperAdmin ? 'cursor-pointer hover:border-emerald-500/60' : ''} transition-colors group`}
         >
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
@@ -271,10 +296,16 @@ export const SystemPage: React.FC = () => {
                 <Fingerprint className="h-4 w-4 text-primary" />
                 <span>OIDC 邮箱自动绑定</span>
               </CardTitle>
-              <span className="text-[11px] text-primary group-hover:underline flex items-center gap-0.5">
-                <Settings className="h-3 w-3" />
-                <span>配置</span>
-              </span>
+              {isSuperAdmin ? (
+                <span className="text-[11px] text-primary group-hover:underline flex items-center gap-0.5">
+                  <Settings className="h-3 w-3" />
+                  <span>配置</span>
+                </span>
+              ) : (
+                <Badge variant="secondary" className="text-[10px]">
+                  仅超管可配置
+                </Badge>
+              )}
             </div>
           </CardHeader>
           <CardContent>
@@ -304,13 +335,30 @@ export const SystemPage: React.FC = () => {
         </Card>
       </div>
 
+      {/* 租户与组织管理 (多租户隔离的根) */}
+      <TenantPanel />
+
       {/* 用户列表 */}
       <Card>
         <CardHeader>
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
           <CardTitle className="text-base">后台用户列表</CardTitle>
           <CardDescription className="text-xs">
-            为用户设置「绑定邮箱」后，该用户通过 OIDC 企业单点登录时将自动识别并绑定登录
+            用户只能看到并操作自己租户内的公众号数据；设置「绑定邮箱」后即可通过 OIDC 单点登录自动匹配
           </CardDescription>
+          {isSuperAdmin && (
+            <div className="flex items-center gap-2 shrink-0">
+              <Switch
+                id="view-all-tenants"
+                checked={viewAllTenants}
+                onCheckedChange={setViewAllTenants}
+              />
+              <label htmlFor="view-all-tenants" className="text-xs text-muted-foreground cursor-pointer">
+                跨租户总览全部成员
+              </label>
+            </div>
+          )}
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           <Table>
@@ -320,6 +368,7 @@ export const SystemPage: React.FC = () => {
                 <TableHead>绑定邮箱 (用于 OIDC 匹配)</TableHead>
                 <TableHead>昵称</TableHead>
                 <TableHead>角色 (Role)</TableHead>
+                {isSuperAdmin && <TableHead>所属租户</TableHead>}
                 <TableHead>账号状态</TableHead>
                 <TableHead>创建时间</TableHead>
                 <TableHead className="text-right">操作</TableHead>
@@ -328,7 +377,7 @@ export const SystemPage: React.FC = () => {
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">加载中...</TableCell>
+                  <TableCell colSpan={isSuperAdmin ? 8 : 7} className="h-24 text-center text-muted-foreground">加载中...</TableCell>
                 </TableRow>
               ) : users?.map((u) => (
                 <TableRow key={u.id} className="text-xs">
@@ -349,6 +398,14 @@ export const SystemPage: React.FC = () => {
                       {u.role}
                     </Badge>
                   </TableCell>
+                  {isSuperAdmin && (
+                    <TableCell>
+                      <div className="flex flex-col">
+                        <span className="font-medium">{u.tenant_name || `租户 #${u.tenant_id}`}</span>
+                        <span className="text-[10px] text-muted-foreground font-mono">{u.tenant_code}</span>
+                      </div>
+                    </TableCell>
+                  )}
                   <TableCell>
                     <div className="flex items-center gap-2">
                       <Switch
@@ -486,6 +543,9 @@ export const SystemPage: React.FC = () => {
                   placeholder="留空则不修改已有密钥"
                   className="font-mono text-xs"
                 />
+                <p className="text-[11px] text-muted-foreground">
+                  系统级 SSO 凭据，仅超级管理员可见与修改；其他角色读取时自动脱敏
+                </p>
               </div>
             </div>
 
@@ -524,6 +584,26 @@ export const SystemPage: React.FC = () => {
                   </select>
                 </div>
               )}
+
+              {oidcAutoRegister && (tenantOptions?.length ?? 0) > 0 && (
+                <div className="space-y-1.5 pt-2 border-t border-border/50">
+                  <label className="font-semibold text-foreground">自动创建账号归属的租户组织</label>
+                  <select
+                    value={oidcDefaultTenantId}
+                    onChange={(e) => setOidcDefaultTenantId(Number(e.target.value))}
+                    className="w-full h-8 rounded-lg border border-input bg-background px-2.5 text-xs text-foreground"
+                  >
+                    {(tenantOptions || []).map((t) => (
+                      <option key={t.id} value={t.id}>
+                        #{t.id} {t.name} ({t.code})
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[11px] text-muted-foreground">
+                    外部人员首次 OIDC 登录会自动建号并落入该租户，仅能看到该租户的公众号数据；非超级管理员不可修改归属租户
+                  </p>
+                </div>
+              )}
             </div>
 
             <DialogFooter className="pt-2">
@@ -542,6 +622,7 @@ export const SystemPage: React.FC = () => {
                     scopes: oidcScopes,
                     auto_register: oidcAutoRegister,
                     default_role: oidcDefaultRole,
+                    default_tenant_id: oidcDefaultTenantId,
                   })
                 }
                 disabled={saveOidcMutation.isPending}
@@ -618,6 +699,26 @@ export const SystemPage: React.FC = () => {
               </select>
             </div>
 
+
+            {isSuperAdmin && (
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold">所属租户 / 组织</label>
+                <select
+                  value={userTenantId}
+                  onChange={(e) => setUserTenantId(Number(e.target.value))}
+                  className="w-full h-9 rounded-lg border border-input bg-background px-3 text-sm"
+                >
+                  {(tenantOptions || []).map((t) => (
+                    <option key={t.id} value={t.id}>
+                      #{t.id} {t.name} ({t.code})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-muted-foreground">
+                  用户的数据可见范围完全由所属租户决定；新组织建议直接在上方「租户与组织」新建并附带初始管理员
+                </p>
+              </div>
+            )}
             <DialogFooter className="pt-2">
               <Button variant="outline" onClick={() => setUserModalOpen(false)}>取消</Button>
               <Button onClick={handleSave} disabled={saveUserMutation.isPending}>

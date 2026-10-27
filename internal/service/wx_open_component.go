@@ -245,6 +245,8 @@ func (s *WxOpenService) QueryAuth(ctx context.Context, componentAppID, authCode 
 	originalID := ""
 	qrCodeURL := ""
 	signature := ""
+	// 默认按公众号记录，若官方档案显示为小程序授权则改写
+	accountKind := "authorized"
 	authorizerInfo, err := s.GetAuthorizerInfo(ctx, componentAppID, info.AuthorizerAppid)
 	if err == nil && authorizerInfo != nil {
 		if authorizerInfo.AuthorizerInfo.NickName != "" {
@@ -257,6 +259,11 @@ func (s *WxOpenService) QueryAuth(ctx context.Context, componentAppID, authCode 
 		originalID = authorizerInfo.AuthorizerInfo.UserName
 		qrCodeURL = authorizerInfo.AuthorizerInfo.QRCodeURL
 		signature = authorizerInfo.AuthorizerInfo.Signature
+		// 微信官方以是否存在 MiniProgramInfo 判定授权账号是否为小程序，
+		// 正确标注后才能被「代码发布管理」的小程序选择器检索到
+		if authorizerInfo.AuthorizerInfo.MiniProgramInfo != nil {
+			accountKind = "miniprogram"
+		}
 	}
 
 	// 自动在当前租户下创建或更新公众号记录
@@ -267,7 +274,7 @@ func (s *WxOpenService) QueryAuth(ctx context.Context, componentAppID, authCode 
 			TenantID:               tenantID,
 			Name:                   accountName,
 			AppID:                  info.AuthorizerAppid,
-			AccountType:            "authorized",
+			AccountType:            accountKind,
 			ComponentAppID:         componentAppID,
 			AuthorizerRefreshToken: info.AuthorizerRefreshToken,
 			FuncInfo:               string(funcInfoBytes),
@@ -283,7 +290,7 @@ func (s *WxOpenService) QueryAuth(ctx context.Context, componentAppID, authCode 
 		database.DB.Create(&account)
 	} else {
 		account.Name = accountName
-		account.AccountType = "authorized"
+		account.AccountType = accountKind
 		account.ComponentAppID = componentAppID
 		account.AuthorizerRefreshToken = info.AuthorizerRefreshToken
 		account.FuncInfo = string(funcInfoBytes)
@@ -299,6 +306,9 @@ func (s *WxOpenService) QueryAuth(ctx context.Context, componentAppID, authCode 
 		if signature != "" && account.Description == "" {
 			account.Description = signature
 		}
+		if accountKind == "miniprogram" && account.AccountType != "miniprogram" {
+			account.AccountType = "miniprogram"
+		}
 		account.Enabled = true
 		database.DB.Save(&account)
 	}
@@ -308,6 +318,9 @@ func (s *WxOpenService) QueryAuth(ctx context.Context, componentAppID, authCode 
 
 // RefreshAuthorizerToken 刷新公众号的 authorizer_access_token
 func (s *WxOpenService) RefreshAuthorizerToken(ctx context.Context, componentAppID, authorizerAppID, refreshToken string) (string, error) {
+	if strings.TrimSpace(refreshToken) == "" {
+		return "", fmt.Errorf("该账号缺少 authorizer_refresh_token，尚未完成微信扫码授权托管 (或授权记录已被清除)。请在「公众号与开放平台」重新发起扫码授权后再操作")
+	}
 	cacheKey := fmt.Sprintf("wx:authorizer:token:%s", authorizerAppID)
 	if cache.RDB != nil {
 		val, err := cache.RDB.Get(ctx, cacheKey).Result()

@@ -34,14 +34,21 @@ type UpdateAccountRequest struct {
 	Enabled        *bool  `json:"enabled"`
 }
 
-// List 获取当前租户下的所有公众号
+// List 获取公众号列表
+// 默认只返回「当前租户视角」内的账号 (超级管理员可通过 X-Tenant-ID 切换视角)；
+// 仅当超级管理员显式携带 ?all=1 时才跨租户总览，并在结果中标注归属租户，避免混淆。
 func (h *AccountHandler) List(c *gin.Context) {
 	tenantID := GetTenantID(c)
 	var list []model.WxAccount
 
 	query := database.DB.Model(&model.WxAccount{})
-	if !IsSuperAdmin(c) {
+	scopeAll := IsSuperAdmin(c) && c.Query("all") == "1"
+	if !scopeAll {
 		query = query.Where("tenant_id = ?", tenantID)
+	}
+	if kw := strings.TrimSpace(c.Query("keyword")); kw != "" {
+		like := "%" + kw + "%"
+		query = query.Where("name LIKE ? OR app_id LIKE ?", like, like)
 	}
 
 	if err := query.Order("is_default desc, id desc").Find(&list).Error; err != nil {
@@ -52,9 +59,21 @@ func (h *AccountHandler) List(c *gin.Context) {
 	role, _ := c.Get("role")
 	isAdmin := role == "admin" || role == "superadmin"
 
+	tenantMap := make(map[uint]model.Tenant)
+	if scopeAll {
+		var tenants []model.Tenant
+		database.DB.Model(&model.Tenant{}).Select("id", "name", "code").Find(&tenants)
+		for _, t := range tenants {
+			tenantMap[t.ID] = t
+		}
+	}
+
 	type AccountVO struct {
 		model.WxAccount
 		CallbackURL string `json:"callback_url"`
+		TenantName  string `json:"tenant_name,omitempty"`
+		TenantCode  string `json:"tenant_code,omitempty"`
+		Manageable  bool   `json:"manageable"`
 	}
 
 	result := make([]AccountVO, len(list))
@@ -64,10 +83,16 @@ func (h *AccountHandler) List(c *gin.Context) {
 			acc.EncodingAESKey = "******"
 		}
 		cb := BuildPublicURL(c, fmt.Sprintf("/wxmp/%s/handler", acc.AppID))
-		result[i] = AccountVO{
+		vo := AccountVO{
 			WxAccount:   acc,
 			CallbackURL: cb,
+			Manageable:  acc.TenantID == tenantID,
 		}
+		if t, ok := tenantMap[acc.TenantID]; ok {
+			vo.TenantName = t.Name
+			vo.TenantCode = t.Code
+		}
+		result[i] = vo
 	}
 
 	Ok(c, result)
@@ -86,6 +111,21 @@ func (h *AccountHandler) Create(c *gin.Context) {
 	database.DB.Model(&model.WxAccount{}).Where("app_id = ? AND tenant_id = ?", req.AppID, tenantID).Count(&count)
 	if count > 0 {
 		Fail(c, http.StatusBadRequest, "该 AppID 在当前租户下已存在")
+		return
+	}
+
+	// 租户隔离允许不同租户录入相同 AppID，但同一微信号被两个组织分别接入极易引发串号，
+	// 因此默认拒绝，仅超级管理员可在确认风险后用 force 强制录入。
+	var crossCount int64
+	database.DB.Model(&model.WxAccount{}).Where("app_id = ?", req.AppID).Count(&crossCount)
+	if crossCount > 0 && c.Query("force") != "1" {
+		var other model.WxAccount
+		database.DB.Where("app_id = ?", req.AppID).First(&other)
+		var otherTenant model.Tenant
+		database.DB.First(&otherTenant, other.TenantID)
+		Fail(c, http.StatusBadRequest, fmt.Sprintf(
+			"AppID %s 已在租户「%s(%s)」中录入。多租户数据相互隔离，同一微信账号跨租户重复接入会导致回复与菜单互相干扰；请切换到该租户视角维护，或确认无误后带 force=1 重试",
+			req.AppID, otherTenant.Name, otherTenant.Code))
 		return
 	}
 
@@ -118,14 +158,10 @@ func (h *AccountHandler) Update(c *gin.Context) {
 	tenantID := GetTenantID(c)
 	id := c.Param("id")
 
+	// 严格按当前租户视角隔离：超级管理员如需维护其他租户，请先切换租户视角，避免误操作
 	var account model.WxAccount
-	query := database.DB.Where("id = ?", id)
-	if !IsSuperAdmin(c) {
-		query = query.Where("tenant_id = ?", tenantID)
-	}
-
-	if err := query.First(&account).Error; err != nil {
-		Fail(c, http.StatusNotFound, "公众号不存在或无权操作")
+	if err := database.DB.Where("id = ? AND tenant_id = ?", id, tenantID).First(&account).Error; err != nil {
+		Fail(c, http.StatusNotFound, "公众号不存在或不属于当前租户视角 (超级管理员请先在顶栏切换租户视角)")
 		return
 	}
 
@@ -170,14 +206,9 @@ func (h *AccountHandler) Delete(c *gin.Context) {
 	tenantID := GetTenantID(c)
 	id := c.Param("id")
 
-	query := database.DB.Where("id = ?", id)
-	if !IsSuperAdmin(c) {
-		query = query.Where("tenant_id = ?", tenantID)
-	}
-
-	res := query.Delete(&model.WxAccount{})
+	res := database.DB.Where("id = ? AND tenant_id = ?", id, tenantID).Delete(&model.WxAccount{})
 	if res.RowsAffected == 0 {
-		Fail(c, http.StatusNotFound, "公众号不存在或无权操作")
+		Fail(c, http.StatusNotFound, "公众号不存在或不属于当前租户视角 (超级管理员请先切换租户视角)")
 		return
 	}
 
@@ -190,12 +221,8 @@ func (h *AccountHandler) SetDefault(c *gin.Context) {
 	id := c.Param("id")
 
 	var account model.WxAccount
-	query := database.DB.Where("id = ?", id)
-	if !IsSuperAdmin(c) {
-		query = query.Where("tenant_id = ?", tenantID)
-	}
-	if err := query.First(&account).Error; err != nil {
-		Fail(c, http.StatusNotFound, "公众号不存在或无权操作")
+	if err := database.DB.Where("id = ? AND tenant_id = ?", id, tenantID).First(&account).Error; err != nil {
+		Fail(c, http.StatusNotFound, "公众号不存在或不属于当前租户视角 (超级管理员请先切换租户视角)")
 		return
 	}
 
@@ -210,12 +237,8 @@ func (h *AccountHandler) GetAuthorizerDetail(c *gin.Context) {
 	id := c.Param("id")
 
 	var account model.WxAccount
-	query := database.DB.Where("id = ?", id)
-	if !IsSuperAdmin(c) {
-		query = query.Where("tenant_id = ?", tenantID)
-	}
-	if err := query.First(&account).Error; err != nil {
-		Fail(c, http.StatusNotFound, "公众号不存在或无权查看")
+	if err := database.DB.Where("id = ? AND tenant_id = ?", id, tenantID).First(&account).Error; err != nil {
+		Fail(c, http.StatusNotFound, "公众号不存在或不属于当前租户视角 (超级管理员请先切换租户视角)")
 		return
 	}
 
@@ -223,7 +246,7 @@ func (h *AccountHandler) GetAuthorizerDetail(c *gin.Context) {
 	storedFuncInfo := parseStoredFuncInfo(account.FuncInfo)
 
 	// 1. 开放平台第三方代管账号: 实时调用微信官方接口取权威档案
-	if account.AccountType == "authorized" && account.ComponentAppID != "" {
+	if account.IsThirdPartyManaged() {
 		detail, err := service.DefaultWxOpenService.GetAuthorizerInfo(c.Request.Context(), account.ComponentAppID, account.AppID)
 		if err != nil {
 			// 官方接口失败时降级返回本地已落库档案，避免前端整页空白
@@ -255,6 +278,12 @@ func (h *AccountHandler) GetAuthorizerDetail(c *gin.Context) {
 		}
 		if info.Signature != "" && account.Description == "" {
 			updates["description"] = info.Signature
+		}
+		// 微信官方档案显示为小程序授权 (存在 MiniProgramInfo) 时，纠正账号类型，
+		// 使其能被「代码发布管理」的小程序选择器正确检索到
+		if detail.AuthorizerInfo.MiniProgramInfo != nil && account.AccountType != "miniprogram" {
+			updates["account_type"] = "miniprogram"
+			account.AccountType = "miniprogram"
 		}
 		if len(detail.AuthorizationInfo.FuncInfo) > 0 {
 			if b, e := json.Marshal(detail.AuthorizationInfo.FuncInfo); e == nil && string(b) != account.FuncInfo {

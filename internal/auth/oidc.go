@@ -55,9 +55,9 @@ func createOIDCClient() *resty.Client {
 
 	return resty.New().
 		SetTransport(transport).
-		SetTimeout(10 * time.Second).
+		SetTimeout(10*time.Second).
 		SetRetryCount(2).
-		SetRetryWaitTime(250 * time.Millisecond).
+		SetRetryWaitTime(250*time.Millisecond).
 		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
 }
 
@@ -287,12 +287,33 @@ func (s *OIDCService) HandleCallback(ctx context.Context, code, host string) (*m
 		if defaultRole == "" {
 			defaultRole = "operator"
 		}
+		// 自动建号归属优先级：数据库显式配置 > 配置文件 oidc.default_tenant_id > 该 OIDC 配置所属租户 > 默认租户 1
+		defaultTenantID := cfg.DefaultTenantID
+		if defaultTenantID == 0 {
+			defaultTenantID = 1
+		}
+		if defaultTenantID > 1 {
+			var cfgTenant model.Tenant
+			if terr := database.DB.First(&cfgTenant, defaultTenantID).Error; terr != nil || cfgTenant.Status != 1 {
+				logger.Warn("OIDC: oidc.default_tenant_id 无效，回退默认租户 1", zap.Uint("default_tenant_id", defaultTenantID))
+				defaultTenantID = 1
+			}
+		}
 
 		var dbSetting model.SystemOIDCSetting
 		if err := database.DB.Where("enabled = ?", true).First(&dbSetting).Error; err == nil {
+			if dbSetting.TenantID > 0 && defaultTenantID == 1 {
+				defaultTenantID = dbSetting.TenantID
+			}
 			autoRegister = dbSetting.AutoRegister
 			if dbSetting.DefaultRole != "" {
 				defaultRole = dbSetting.DefaultRole
+			}
+			if dbSetting.DefaultTenantID > 0 {
+				var tenant model.Tenant
+				if terr := database.DB.First(&tenant, dbSetting.DefaultTenantID).Error; terr == nil && tenant.Status == 1 {
+					defaultTenantID = tenant.ID
+				}
 			}
 		}
 
@@ -331,7 +352,7 @@ func (s *OIDCService) HandleCallback(ctx context.Context, code, host string) (*m
 
 		hash, _ := bcrypt.GenerateFromPassword([]byte("oidc_user@2025"), bcrypt.DefaultCost)
 		user = model.User{
-			TenantID:   1,
+			TenantID:   defaultTenantID,
 			Username:   username,
 			Email:      oidcUser.Email,
 			Password:   string(hash),

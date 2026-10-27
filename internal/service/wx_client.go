@@ -5,8 +5,8 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
-	"net/url"
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -14,7 +14,7 @@ import (
 	"github.com/anchel/wechat-official-account-admin/internal/cache"
 	"github.com/anchel/wechat-official-account-admin/internal/database"
 	"github.com/anchel/wechat-official-account-admin/internal/model"
-		"github.com/go-resty/resty/v2"
+	"github.com/go-resty/resty/v2"
 )
 
 type WxClient struct {
@@ -33,7 +33,7 @@ func NewWxClient(appid string) (*WxClient, error) {
 	}
 
 	client := resty.New().
-		SetTimeout(15 * time.Second).
+		SetTimeout(15*time.Second).
 		SetHeader("User-Agent", "woaa-server/2.0")
 
 	return &WxClient{
@@ -60,7 +60,7 @@ func (w *WxClient) CheckSignature(signature, timestamp, nonce string) bool {
 // GetAccessToken 获取微信 AccessToken (智能适配直连公众号与开放平台第三方代管公众号)
 func (w *WxClient) GetAccessToken(ctx context.Context) (string, error) {
 	// 如果是微信第三方平台代管授权接入
-	if w.Account.AccountType == "authorized" && w.Account.ComponentAppID != "" {
+	if w.Account.IsThirdPartyManaged() {
 		return DefaultWxOpenService.RefreshAuthorizerToken(
 			ctx,
 			w.Account.ComponentAppID,
@@ -553,14 +553,14 @@ func (w *WxClient) BatchUntaggingMembers(ctx context.Context, tagID int, openIDs
 }
 
 type WxArticleItem struct {
-	Title            string `json:"title"`
-	Author           string `json:"author"`
-	Digest           string `json:"digest"`
-	Content          string `json:"content"`
-	ContentSourceURL string `json:"content_source_url"`
-	ThumbMediaID     string `json:"thumb_media_id"`
-	NeedOpenComment  int    `json:"need_open_comment,omitempty"`
-	OnlyFansCanComment int  `json:"only_fans_can_comment,omitempty"`
+	Title              string `json:"title"`
+	Author             string `json:"author"`
+	Digest             string `json:"digest"`
+	Content            string `json:"content"`
+	ContentSourceURL   string `json:"content_source_url"`
+	ThumbMediaID       string `json:"thumb_media_id"`
+	NeedOpenComment    int    `json:"need_open_comment,omitempty"`
+	OnlyFansCanComment int    `json:"only_fans_can_comment,omitempty"`
 }
 
 // AddNewsMaterial 添加图文素材 (新增草稿箱/永久图文文章)

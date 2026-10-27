@@ -306,7 +306,7 @@ func (h *MiniProgramHandler) requireThirdPartyOfficial(c *gin.Context) string {
 		Fail(c, http.StatusBadRequest, "当前选中的是小程序账号，「关联小程序」需要切换到公众号账号后再操作")
 		return ""
 	}
-	if account.AccountType != "authorized" || account.ComponentAppID == "" {
+	if !account.IsThirdPartyManaged() {
 		Fail(c, http.StatusBadRequest, fmt.Sprintf(
 			"公众号 %s 是「直连凭据」接入，无法查询或管理关联小程序：该能力是微信开放平台的第三方代调用接口 (权限集 id=33)，直连 access_token 调用会被微信拒绝 (48001 api unauthorized)。请在「公众号与开放平台」中改用「微信扫码一键授权接入」托管该公众号 (授权时勾选「小程序关联管理」权限集)，或直接登录微信公众平台后台手动管理关联。", appid))
 		return ""
@@ -507,22 +507,39 @@ func requireMiniApp(c *gin.Context) string {
 	return appid
 }
 
-// ListMiniApps 获取当前租户下可被代管代码的账号列表 (供前端选择目标小程序)
+// ListMiniApps 获取当前租户下的账号列表 (默认只返回小程序，供「代码发布管理」选择目标小程序)
+// kind=miniprogram(默认) | official | all
 func (h *MiniProgramHandler) ListMiniApps(c *gin.Context) {
 	tenantID := GetTenantID(c)
+	kind := strings.TrimSpace(c.DefaultQuery("kind", "miniprogram"))
+
 	var list []model.WxAccount
 	database.DB.Where("tenant_id = ? AND enabled = ?", tenantID, true).
 		Order("account_type asc, id asc").Find(&list)
 
 	out := make([]gin.H, 0, len(list))
 	for _, a := range list {
+		isMini := a.AccountType == "miniprogram"
+		switch kind {
+		case "official":
+			if isMini {
+				continue
+			}
+		case "all":
+		default: // miniprogram
+			if !isMini {
+				continue
+			}
+		}
 		out = append(out, gin.H{
-			"id":           a.ID,
-			"name":         a.Name,
-			"appid":        a.AppID,
-			"original_id":  a.OriginalID,
-			"account_type": a.AccountType,
-			"avatar_url":   a.AvatarURL,
+			"id":             a.ID,
+			"name":           a.Name,
+			"appid":          a.AppID,
+			"original_id":    a.OriginalID,
+			"account_type":   a.AccountType,
+			"is_miniprogram": isMini,
+			"managed":        a.IsThirdPartyManaged(),
+			"avatar_url":     a.AvatarURL,
 		})
 	}
 	Ok(c, out)

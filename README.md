@@ -87,9 +87,14 @@
    - 记录每次 API 请求的 Client IP、耗时、状态码、请求体与响应体。
    - 自动关联 OpenTelemetry TraceID。
 
-9. **多租户严格数据隔离 (Multi-Tenancy & Anti-Privilege-Escalation)**:
-   - 租户组织模型 (`Tenant`) 强制隔离所有业务数据。
-   - 中间件级防越权拦截：严格校验请求所携带的 `X-App-ID` 是否隶属于当前租户，彻底阻断跨租户水平越权攻击。
+9. **多租户严格数据隔离与租户管理 (Multi-Tenancy & Anti-Privilege-Escalation)**:
+   - 租户组织模型 (`Tenant`) 强制隔离所有业务数据（公众号/小程序、菜单、素材、自动回复、粉丝与标签、带参二维码、群发与模板消息、第三方平台凭证、日志）。
+   - 「系统与权限 → 租户与组织」支持超级管理员**新建 / 编辑 / 停用 / 删除租户**，并可一键为该租户创建初始管理员（角色固定 `admin`，不可自举超级管理员）。
+   - **租户视角切换**：超级管理员通过请求头 `X-Tenant-ID` 显式切换到某个已启用租户（顶栏下拉即可操作），切换后新增的公众号与全部业务数据都归属该租户；普通用户携带该头会被无条件忽略。
+   - 中间件级防越权拦截：`TenantAppID` 对**所有角色（含超级管理员）**校验 `X-App-ID` 是否隶属"当前租户视角"，跨租户访问一律 403 并写入告警日志。
+   - 数据面收口：账号/用户/第三方平台配置的读写一律以「当前租户视角」为过滤条件；删除租户前必须先清空该租户下的微信账号与用户，避免产生孤立数据。
+   - 同一个微信号 (AppID) 不允许被两个租户重复接入，避免多组织互相干扰（超级管理员可确认后用 `?force=1` 强制录入）。
+   - OIDC 单点登录为**系统级配置**：仅超级管理员可修改，客户端密钥对非超级管理员自动脱敏；自动建号可指定归属租户，防止外部人员落入他租户。
 
 
 10. **微信小程序代开发与快速注册 (Mini Program Lifecycle)**:
@@ -213,6 +218,30 @@
    - 初始密码：`admin123`
    - 归属租户：默认组织 (ID: 1)
    - 角色：`superadmin`
+
+### 多租户（组织）快速上手
+
+平台天生多租户：**一个租户 = 一个独立组织（分公司 / 客户 / 代运营主体）**，租户之间数据完全不可见。
+
+1. **创建租户**：超级管理员进入「系统与权限 → 租户与组织 → 新建租户」，填写组织名称与唯一标识 (code，字母开头，如 `east-branch`)，并勾选"同时创建初始管理员"，设置其用户名/密码/绑定邮箱。
+   - API 方式：
+     ```bash
+     curl -X POST http://127.0.0.1:8080/api/system/tenants \
+       -H "Authorization: Bearer <超级管理员Token>" -H 'Content-Type: application/json' \
+       -d '{"name":"华东分公司","code":"east-branch","description":"华东区代运营",
+            "admin_username":"east_admin","admin_password":"east123456","admin_email":"east@company.com"}'
+     ```
+2. **为该租户接入公众号**（两种等价方式）：
+   - 直接用刚创建的 `east_admin` 登录，在「公众号与开放平台」添加或扫码授权接入 —— 数据自动归属华东分公司；
+   - 或超级管理员在顶栏「租户视角」下拉切换到「华东分公司」后再录入（页面顶部会显示当前租户视角与代管警示）。
+3. **成员与权限**：`系统与权限 → 后台用户` 中，超级管理员可指定成员所属租户（也可开启"跨租户总览"查看所有成员）；普通管理员只能维护本租户成员。角色含义：
+   - `superadmin` 超级管理员：可管理租户、OIDC 等系统级配置，可切换租户视角；
+   - `admin` 租户管理员：本租户全量业务权限（含查看/修改本租户公众号凭据）；
+   - `operator` / `viewer`：本租户业务操作 / 只读。
+4. **停用与删除**：停用租户后其成员无法登录、也无法被切换视角（列表内该行的"切换视角"按钮会自动禁用）；删除租户要求该租户下**没有任何微信账号与用户**，且不允许删除/停用你自己所属的租户。
+5. **隔离边界与审计**：跨租户请求返回 `403 越权访问被拒绝…`，并在服务端日志中记录 `username / tenant_id / home_tenant_id / appid / client_ip`；「请求与追踪日志」页可按本租户审计。
+
+> 说明：租户数据在同表内通过 `tenant_id` 逻辑隔离，所有查询与写入都由中间件与 handler 双重强制附加租户条件；如需物理隔离部署（每租户独立库），请使用多实例部署方案。
 
 > ⚠️ **安全建议**：首次登录后，请立即进入「系统与权限」页面或通过 API 修改管理员初始密码！
 
@@ -434,7 +463,28 @@ server {
 | `asynq.concurrency` | `WOAA_ASYNQ_CONCURRENCY` | `5` | Asynq 异步任务并发 Worker 数 |
 | `jwt.secret` | `WOAA_JWT_SECRET` | 内置默认密钥 | JWT 签名密钥 (生产环境建议修改) |
 | `jwt.expire_hours` | `WOAA_JWT_EXPIRE_HOURS` | `72` | 登录令牌有效期 (小时) |
+| `oidc.enabled` | `WOAA_OIDC_ENABLED` | `false` | 是否启用 OIDC 单点登录 (仅超级管理员可在后台可视化修改) |
+| `oidc.issuer` | `WOAA_OIDC_ISSUER` | 空 | OIDC Issuer，如 `https://auth.example.com/realms/master` |
+| `oidc.client_id` / `oidc.client_secret` | `WOAA_OIDC_CLIENT_ID` / `WOAA_OIDC_CLIENT_SECRET` | 空 | SSO 客户端凭据 (密钥对非超级管理员自动脱敏) |
+| `oidc.redirect_uri` | `WOAA_OIDC_REDIRECT_URI` | 空 | 回调地址，留空自动按 `public_host`/反向代理协议生成 |
+| `oidc.scopes` | `WOAA_OIDC_SCOPES` | `openid profile email` | 授权范围 (务必包含 `email` 才能按邮箱匹配绑定) |
+| `oidc.auto_register` | `WOAA_OIDC_AUTO_REGISTER` | `false` | 未录入邮箱的 OIDC 用户是否自动建号 (推荐保持关闭) |
+| `oidc.default_role` | `WOAA_OIDC_DEFAULT_ROLE` | `operator` | 自动建号角色 (仅 `operator` / `viewer`，禁止自动提权) |
+| `oidc.default_tenant_id` | `WOAA_OIDC_DEFAULT_TENANT_ID` | `0` | 自动建号归属租户 ID；`0` 表示沿用该 OIDC 配置所属租户，最终兜底默认租户 1 |
 | `wechat.public_host` | `WOAA_WECHAT_PUBLIC_HOST` | 空 | 外部访问公网域名 (若为空自动取 Host) |
+
+### 租户与组织相关接口
+
+| 方法 | 路径 | 权限 | 说明 |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/system/tenants` | 超级管理员=全部；其他=仅本租户(只读) | 租户列表，附带微信账号数/用户数与视角标记 |
+| `GET` | `/api/system/tenants/options` | 全部(按可见范围) | 租户下拉选项 (分配成员归属时使用) |
+| `POST` | `/api/system/tenants` | **仅超级管理员** | 新建租户，可同时创建该租户初始管理员 (`admin`) |
+| `PUT` | `/api/system/tenants/:id` | **仅超级管理员** | 修改名称/描述/启停 (唯一标识 code 不可改) |
+| `DELETE` | `/api/system/tenants/:id` | **仅超级管理员** | 删除空租户 (仍有账号或用户时返回 400) |
+| `GET/POST/PUT/DELETE` | `/api/system/users` | 当前租户视角内 | 成员管理；超级管理员可带 `tenant_id` 跨租户分配/迁移，`?all=1` 跨租户总览 |
+
+> 请求头约定：`X-Tenant-ID: <id>` 仅对超级管理员生效（用于切换租户视角），后端会校验该租户存在且已启用，否则返回 403；普通用户携带该头将被无条件忽略。
 
 ---
 

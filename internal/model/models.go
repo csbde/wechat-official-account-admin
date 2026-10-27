@@ -204,6 +204,13 @@ type RequestLog struct {
 	CreatedAt    time.Time `gorm:"index" json:"created_at"`
 }
 
+// IsThirdPartyManaged 判断该账号是否由微信开放平台第三方平台代管 (扫码授权托管)。
+// 兼容两类账号: authorized (公众号) 与 miniprogram (小程序，含快速注册开通与扫码授权接入)。
+// 判定依据是「是否已绑定第三方平台」，因此不依赖 account_type 的字面值，避免账号类型标注变化后凭据获取逻辑失效。
+func (a *WxAccount) IsThirdPartyManaged() bool {
+	return a.ComponentAppID != "" && (a.AccountType == "authorized" || a.AccountType == "miniprogram")
+}
+
 // AutoMigrate 执行所有多租户与开放平台实体的数据库自动迁移
 func AutoMigrate(db *gorm.DB) error {
 	return db.AutoMigrate(
@@ -247,35 +254,36 @@ type WxAISetting struct {
 
 // SystemOIDCSetting OIDC 单点登录系统可视化持久化配置
 type SystemOIDCSetting struct {
-	ID           uint           `gorm:"primaryKey" json:"id"`
-	TenantID     uint           `gorm:"index;not null;default:1" json:"tenant_id"`
-	Enabled      bool           `gorm:"default:false" json:"enabled"`
-	Issuer       string         `gorm:"size:255" json:"issuer"`
-	ClientID     string         `gorm:"size:128" json:"client_id"`
-	ClientSecret string         `gorm:"size:255" json:"client_secret"`
-	RedirectURI  string         `gorm:"size:255" json:"redirect_uri"`
-	Scopes       string         `gorm:"size:255;default:'openid profile email'" json:"scopes"`
-	AutoRegister bool           `gorm:"default:false" json:"auto_register"`        // 是否允许未录入邮箱自动创建账号 (默认关闭，防止非授权人员获取权限)
-	DefaultRole  string         `gorm:"size:32;default:'operator'" json:"default_role"` // 自动注册账号时的默认权限角色 (operator / viewer)
-	CreatedAt    time.Time      `json:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
-	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
+	ID              uint           `gorm:"primaryKey" json:"id"`
+	TenantID        uint           `gorm:"index;not null;default:1" json:"tenant_id"`
+	Enabled         bool           `gorm:"default:false" json:"enabled"`
+	Issuer          string         `gorm:"size:255" json:"issuer"`
+	ClientID        string         `gorm:"size:128" json:"client_id"`
+	ClientSecret    string         `gorm:"size:255" json:"client_secret"`
+	RedirectURI     string         `gorm:"size:255" json:"redirect_uri"`
+	Scopes          string         `gorm:"size:255;default:'openid profile email'" json:"scopes"`
+	AutoRegister    bool           `gorm:"default:false" json:"auto_register"`             // 是否允许未录入邮箱自动创建账号 (默认关闭，防止非授权人员获取权限)
+	DefaultRole     string         `gorm:"size:32;default:'operator'" json:"default_role"` // 自动注册账号时的默认权限角色 (operator / viewer)
+	DefaultTenantID uint           `gorm:"index;default:1" json:"default_tenant_id"`       // 自动注册账号归属的租户组织 (默认 1)
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
+	DeletedAt       gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 // WxMiniRegisterTask 微信开放平台快速注册小程序任务
 type WxMiniRegisterTask struct {
 	ID                 uint           `gorm:"primaryKey" json:"id"`
-	TenantID           uint           `gorm:"index;not null;default:1" json:"tenant_id"` // 租户隔离
-	Name               string         `gorm:"size:128;not null" json:"name"`             // 企业名称（需与营业执照一致）
-	Code               string         `gorm:"size:64;not null" json:"code"`              // 企业代码 (统一社会信用代码)
-	CodeType           int            `gorm:"default:1" json:"code_type"`                // 1: 统一社会信用代码, 2: 组织机构代码, 3: 营业执照注册号
+	TenantID           uint           `gorm:"index;not null;default:1" json:"tenant_id"`    // 租户隔离
+	Name               string         `gorm:"size:128;not null" json:"name"`                // 企业名称（需与营业执照一致）
+	Code               string         `gorm:"size:64;not null" json:"code"`                 // 企业代码 (统一社会信用代码)
+	CodeType           int            `gorm:"default:1" json:"code_type"`                   // 1: 统一社会信用代码, 2: 组织机构代码, 3: 营业执照注册号
 	LegalPersonaWechat string         `gorm:"size:64;not null" json:"legal_persona_wechat"` // 法人微信号
 	LegalPersonaName   string         `gorm:"size:64;not null" json:"legal_persona_name"`   // 法人姓名
-	ComponentPhone     string         `gorm:"size:32" json:"component_phone"`            // 第三方平台联系电话
-	Status             int            `gorm:"default:0" json:"status"`                   // 0: 待法人人脸核身, 1: 注册成功, 2: 微信驳回
-	StatusDesc         string         `gorm:"size:255" json:"status_desc"`               // 状态说明文本
-	AppID              string         `gorm:"size:64" json:"appid"`                      // 注册成功后微信下发的小程序 AppID
-	RejectReason       string         `gorm:"size:512" json:"reject_reason,omitempty"`   // 驳回原因
+	ComponentPhone     string         `gorm:"size:32" json:"component_phone"`               // 第三方平台联系电话
+	Status             int            `gorm:"default:0" json:"status"`                      // 0: 待法人人脸核身, 1: 注册成功, 2: 微信驳回
+	StatusDesc         string         `gorm:"size:255" json:"status_desc"`                  // 状态说明文本
+	AppID              string         `gorm:"size:64" json:"appid"`                         // 注册成功后微信下发的小程序 AppID
+	RejectReason       string         `gorm:"size:512" json:"reject_reason,omitempty"`      // 驳回原因
 	CreatedAt          time.Time      `json:"created_at"`
 	UpdatedAt          time.Time      `json:"updated_at"`
 	DeletedAt          gorm.DeletedAt `gorm:"index" json:"-"`
@@ -283,18 +291,18 @@ type WxMiniRegisterTask struct {
 
 // WxMiniSetting 小程序代开发配置与服务器域名
 type WxMiniSetting struct {
-	ID              uint           `gorm:"primaryKey" json:"id"`
-	TenantID        uint           `gorm:"index;not null;default:1" json:"tenant_id"`
-	AppID           string         `gorm:"size:64;uniqueIndex;not null" json:"appid"` // 小程序 AppID
-	RequestDomain   string         `gorm:"type:text" json:"requestdomain"`            // request 合法域名 (换行或逗号分隔)
-	WsDomain        string         `gorm:"type:text" json:"wsrequestdomain"`          // socket 合法域名
-	UploadDomain    string         `gorm:"type:text" json:"uploaddomain"`             // uploadFile 合法域名
-	DownloadDomain  string         `gorm:"type:text" json:"downloaddomain"`           // downloadFile 合法域名
-	WebviewDomain   string         `gorm:"type:text" json:"webviewdomain"`            // 业务域名 (webview)
-	CurrentVersion  string         `gorm:"size:32" json:"current_version,omitempty"`
-	AuditStatus     int            `gorm:"default:0" json:"audit_status"` // 0: 未提审, 1: 审核中, 2: 审核通过, 3: 审核被驳回
-	AuditReason     string         `gorm:"size:512" json:"audit_reason,omitempty"`
-	CreatedAt       time.Time      `json:"created_at"`
-	UpdatedAt       time.Time      `json:"updated_at"`
-	DeletedAt       gorm.DeletedAt `gorm:"index" json:"-"`
+	ID             uint           `gorm:"primaryKey" json:"id"`
+	TenantID       uint           `gorm:"index;not null;default:1" json:"tenant_id"`
+	AppID          string         `gorm:"size:64;uniqueIndex;not null" json:"appid"` // 小程序 AppID
+	RequestDomain  string         `gorm:"type:text" json:"requestdomain"`            // request 合法域名 (换行或逗号分隔)
+	WsDomain       string         `gorm:"type:text" json:"wsrequestdomain"`          // socket 合法域名
+	UploadDomain   string         `gorm:"type:text" json:"uploaddomain"`             // uploadFile 合法域名
+	DownloadDomain string         `gorm:"type:text" json:"downloaddomain"`           // downloadFile 合法域名
+	WebviewDomain  string         `gorm:"type:text" json:"webviewdomain"`            // 业务域名 (webview)
+	CurrentVersion string         `gorm:"size:32" json:"current_version,omitempty"`
+	AuditStatus    int            `gorm:"default:0" json:"audit_status"` // 0: 未提审, 1: 审核中, 2: 审核通过, 3: 审核被驳回
+	AuditReason    string         `gorm:"size:512" json:"audit_reason,omitempty"`
+	CreatedAt      time.Time      `json:"created_at"`
+	UpdatedAt      time.Time      `json:"updated_at"`
+	DeletedAt      gorm.DeletedAt `gorm:"index" json:"-"`
 }

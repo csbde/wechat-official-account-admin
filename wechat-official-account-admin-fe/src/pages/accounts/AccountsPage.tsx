@@ -31,6 +31,7 @@ import {
   Settings,
 } from 'lucide-react'
 import { AuthorizerDetailView } from './AuthorizerDetail'
+import { TenantScopeBanner } from '@/components/common/TenantScopeBanner'
 import { toast } from 'sonner'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -295,6 +296,8 @@ export const AccountsPage: React.FC = () => {
           </Button>
         </div>
       </div>
+
+      <TenantScopeBanner extra="新增账号会自动归属当前租户；需要为其他组织接入，请在「系统与权限 → 租户与组织」新建租户并切换视角" />
 
       {/* 开放平台第三方接入状态提示条 */}
       {openComp ? (

@@ -90,6 +90,29 @@ func GetTenantID(c *gin.Context) uint {
 	return 1
 }
 
+// GetHomeTenantID 获取当前登录用户真实归属的租户 ID
+// (与 GetTenantID 区分：超级管理员切换租户视角时 GetTenantID 会变，本函数始终返回本人所属租户)
+func GetHomeTenantID(c *gin.Context) uint {
+	val, exists := c.Get("home_tenant_id")
+	if !exists {
+		return GetTenantID(c)
+	}
+	if tid, ok := val.(uint); ok && tid > 0 {
+		return tid
+	}
+	return GetTenantID(c)
+}
+
+// IsTenantViewSwitched 判断超级管理员是否处于"代管其他租户"视角
+func IsTenantViewSwitched(c *gin.Context) bool {
+	val, exists := c.Get("tenant_view")
+	if !exists {
+		return false
+	}
+	switched, ok := val.(bool)
+	return ok && switched
+}
+
 // IsSuperAdmin 判断是否超级管理员
 func IsSuperAdmin(c *gin.Context) bool {
 	role, exists := c.Get("role")

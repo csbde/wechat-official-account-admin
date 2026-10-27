@@ -54,6 +54,9 @@ oidc:
     - openid
     - profile
     - email
+  auto_register: false # 未在用户管理中录入邮箱的 OIDC 用户，是否允许自动建号 (推荐 false)
+  default_role: "operator" # 自动建号时的角色 (仅支持 operator / viewer)
+  default_tenant_id: 0 # 自动建号归属的租户 ID (0 = 沿用该 OIDC 配置所属租户；后台可视化配置优先级更高)
 
 wechat:
   public_host: "" # 生产反向代理时若配置了域名，可在此指定 (如 wechat.company.com)

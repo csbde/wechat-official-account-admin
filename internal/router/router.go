@@ -169,6 +169,14 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 		// 系统用户与日志管理 (租户隔离)
 		logHandler := &handler.LogHandler{}
 		protected.GET("/logs", logHandler.List)
+		// 租户与组织管理 (仅超级管理员可增删改，普通用户只读本租户)
+		tenantHandler := &handler.TenantHandler{}
+		protected.GET("/system/tenants", tenantHandler.List)
+		protected.GET("/system/tenants/options", tenantHandler.Options)
+		protected.POST("/system/tenants", tenantHandler.Create)
+		protected.PUT("/system/tenants/:id", tenantHandler.Update)
+		protected.DELETE("/system/tenants/:id", tenantHandler.Delete)
+
 		protected.GET("/system/users", systemHandler.UserList)
 		protected.POST("/system/users", systemHandler.CreateUser)
 		protected.PUT("/system/users/:id", systemHandler.UpdateUser)

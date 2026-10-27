@@ -24,10 +24,10 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Host           string   `mapstructure:"host"`           // 监听主机/IP: 0.0.0.0, 127.0.0.1, 或指定具体网卡IP
-	Port           int      `mapstructure:"port"`           // 监听端口: 9305
-	ListenAddr     string   `mapstructure:"listen_addr"`    // 完整的监听地址，若设置则优先于 host+port，如 127.0.0.1:9305
-	Mode           string   `mapstructure:"mode"`           // debug, release
+	Host           string   `mapstructure:"host"`        // 监听主机/IP: 0.0.0.0, 127.0.0.1, 或指定具体网卡IP
+	Port           int      `mapstructure:"port"`        // 监听端口: 9305
+	ListenAddr     string   `mapstructure:"listen_addr"` // 完整的监听地址，若设置则优先于 host+port，如 127.0.0.1:9305
+	Mode           string   `mapstructure:"mode"`        // debug, release
 	AllowOrigins   []string `mapstructure:"allow_origins"`
 	StaticDir      string   `mapstructure:"static_dir"`
 	TrustedProxies []string `mapstructure:"trusted_proxies"` // 信任的上级反向代理 IP 或网段 (Nginx / Cloudflare 等)
@@ -78,14 +78,15 @@ type JWTConfig struct {
 }
 
 type OIDCConfig struct {
-	Enabled      bool     `mapstructure:"enabled"`
-	Issuer       string   `mapstructure:"issuer"`
-	ClientID     string   `mapstructure:"client_id"`
-	ClientSecret string   `mapstructure:"client_secret"`
-	RedirectURI  string   `mapstructure:"redirect_uri"`
-	Scopes       []string `mapstructure:"scopes"`
-	AutoRegister bool     `mapstructure:"auto_register"` // 是否允许自动注册新账号 (默认 false)
-	DefaultRole  string   `mapstructure:"default_role"`  // 自动创建时的默认角色 (默认 operator)
+	Enabled         bool     `mapstructure:"enabled"`
+	Issuer          string   `mapstructure:"issuer"`
+	ClientID        string   `mapstructure:"client_id"`
+	ClientSecret    string   `mapstructure:"client_secret"`
+	RedirectURI     string   `mapstructure:"redirect_uri"`
+	Scopes          []string `mapstructure:"scopes"`
+	AutoRegister    bool     `mapstructure:"auto_register"`     // 是否允许自动注册新账号 (默认 false)
+	DefaultRole     string   `mapstructure:"default_role"`      // 自动创建时的默认角色 (默认 operator)
+	DefaultTenantID uint     `mapstructure:"default_tenant_id"` // 自动创建账号归属的租户 (默认沿用配置所属租户，最终兜底 1)
 }
 
 type WechatConfig struct {
@@ -166,6 +167,7 @@ func Load(configPath string) (*Config, error) {
 	v.SetDefault("oidc.scopes", []string{"openid", "profile", "email"})
 	v.SetDefault("oidc.auto_register", false)
 	v.SetDefault("oidc.default_role", "operator")
+	v.SetDefault("oidc.default_tenant_id", 0)
 
 	v.SetDefault("telemetry.service_name", "wechat-official-account-admin")
 	v.SetDefault("telemetry.environment", "development")

@@ -21,18 +21,65 @@ import (
 
 type SystemHandler struct{}
 
-// UserList 用户列表 (租户隔离防越权)
+// UserItemView 用户列表项 (附带所属租户名称，便于超级管理员跨租户查看)
+type UserItemView struct {
+	model.User
+	TenantID   uint   `json:"tenant_id"`
+	TenantName string `json:"tenant_name"`
+	TenantCode string `json:"tenant_code"`
+}
+
+// UserList 用户列表 (租户隔离防越权：普通用户只能看到本租户成员)
 func (h *SystemHandler) UserList(c *gin.Context) {
 	tenantID := GetTenantID(c)
 	var users []model.User
 
+	// 默认只列出「当前租户视角」内的成员；超级管理员可用 ?all=1 做跨租户总览
+	scopeAll := IsSuperAdmin(c) && c.Query("all") == "1"
 	query := database.DB.Model(&model.User{})
-	if !IsSuperAdmin(c) {
+	if !scopeAll {
 		query = query.Where("tenant_id = ?", tenantID)
 	}
 
-	query.Order("id asc").Find(&users)
-	Ok(c, users)
+	if err := query.Order("id asc").Find(&users).Error; err != nil {
+		Fail(c, http.StatusInternalServerError, "查询用户列表失败: "+err.Error())
+		return
+	}
+
+	// 一次性取出租户名称映射，避免 N+1
+	var tenants []model.Tenant
+	database.DB.Model(&model.Tenant{}).Select("id", "name", "code").Find(&tenants)
+	tenantMap := make(map[uint]model.Tenant, len(tenants))
+	for _, t := range tenants {
+		tenantMap[t.ID] = t
+	}
+
+	items := make([]UserItemView, 0, len(users))
+	for _, u := range users {
+		t := tenantMap[u.TenantID]
+		items = append(items, UserItemView{
+			User:       u,
+			TenantID:   u.TenantID,
+			TenantName: t.Name,
+			TenantCode: t.Code,
+		})
+	}
+	Ok(c, items)
+}
+
+// resolveTargetTenantID 解析用户归属租户：仅超级管理员可显式指定，其余一律强制本租户
+func resolveTargetTenantID(c *gin.Context, requested *uint, fallback uint) (uint, string, error) {
+	if !IsSuperAdmin(c) || requested == nil || *requested == 0 {
+		return fallback, "", nil
+	}
+	var tenant model.Tenant
+	if err := database.DB.First(&tenant, *requested).Error; err != nil {
+		return 0, "", fmt.Errorf("目标租户不存在 (tenant_id=%d)", *requested)
+	}
+	if tenant.Status != 1 {
+		return 0, "", fmt.Errorf("目标租户 [%s] 已被停用，请先启用后再分配用户", tenant.Name)
+	}
+	return tenant.ID, tenant.Name, nil
 }
 
 // CreateUser 创建系统用户 (支持邮箱配置用于 OIDC 自动匹配)
@@ -44,8 +91,20 @@ func (h *SystemHandler) CreateUser(c *gin.Context) {
 		Password string `json:"password" binding:"required"`
 		Nickname string `json:"nickname"`
 		Role     string `json:"role"`
+		TenantID *uint  `json:"tenant_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
+		Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	if len(req.Password) < 6 {
+		Fail(c, http.StatusBadRequest, "密码长度不能少于 6 位")
+		return
+	}
+
+	// 仅超级管理员可以把用户建到其他租户，否则强制落在自己租户内
+	targetTenantID, targetTenantName, err := resolveTargetTenantID(c, req.TenantID, tenantID)
+	if err != nil {
 		Fail(c, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -73,7 +132,7 @@ func (h *SystemHandler) CreateUser(c *gin.Context) {
 	}
 
 	user := model.User{
-		TenantID: tenantID,
+		TenantID: targetTenantID,
 		Username: req.Username,
 		Email:    req.Email,
 		Password: string(hash),
@@ -81,8 +140,15 @@ func (h *SystemHandler) CreateUser(c *gin.Context) {
 		Role:     role,
 		Status:   1,
 	}
-	database.DB.Create(&user)
-	Ok(c, user)
+	if err := database.DB.Create(&user).Error; err != nil {
+		Fail(c, http.StatusInternalServerError, "创建用户失败: "+err.Error())
+		return
+	}
+	msg := "用户已创建"
+	if targetTenantName != "" && targetTenantID != tenantID {
+		msg = fmt.Sprintf("用户已创建并归属租户 [%s]", targetTenantName)
+	}
+	Ok(c, gin.H{"user": user, "tenant_name": targetTenantName, "message": msg})
 }
 
 // UpdateUser 更新用户 (防越权校验)
@@ -91,13 +157,9 @@ func (h *SystemHandler) UpdateUser(c *gin.Context) {
 	id := c.Param("id")
 
 	var user model.User
-	query := database.DB.Where("id = ?", id)
-	if !IsSuperAdmin(c) {
-		query = query.Where("tenant_id = ?", tenantID)
-	}
-
-	if err := query.First(&user).Error; err != nil {
-		Fail(c, http.StatusNotFound, "用户不存在或无权操作")
+	// 成员管理严格限制在当前租户视角内 (超级管理员需先切换视角)，防止跨租户改密/提权
+	if err := database.DB.Where("id = ? AND tenant_id = ?", id, tenantID).First(&user).Error; err != nil {
+		Fail(c, http.StatusNotFound, "用户不存在或不属于当前租户视角 (超级管理员请先切换租户视角)")
 		return
 	}
 
@@ -107,10 +169,25 @@ func (h *SystemHandler) UpdateUser(c *gin.Context) {
 		Password string `json:"password"`
 		Role     string `json:"role"`
 		Status   *int   `json:"status"`
+		TenantID *uint  `json:"tenant_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		Fail(c, http.StatusBadRequest, err.Error())
 		return
+	}
+
+	// 超级管理员可在租户之间迁移用户 (普通用户携带该字段会被忽略)
+	if req.TenantID != nil && IsSuperAdmin(c) && *req.TenantID != user.TenantID {
+		if user.ID == homeTenantUserID(c) {
+			Fail(c, http.StatusBadRequest, "不能修改自己账号的所属租户")
+			return
+		}
+		newID, _, err := resolveTargetTenantID(c, req.TenantID, user.TenantID)
+		if err != nil {
+			Fail(c, http.StatusBadRequest, err.Error())
+			return
+		}
+		user.TenantID = newID
 	}
 
 	if req.Nickname != "" {
@@ -132,6 +209,10 @@ func (h *SystemHandler) UpdateUser(c *gin.Context) {
 		user.Status = *req.Status
 	}
 	if req.Password != "" {
+		if len(req.Password) < 6 {
+			Fail(c, http.StatusBadRequest, "密码长度不能少于 6 位")
+			return
+		}
 		hash, _ := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 		user.Password = string(hash)
 	}
@@ -149,18 +230,64 @@ func (h *SystemHandler) DeleteUser(c *gin.Context) {
 		Fail(c, http.StatusBadRequest, "不能删除初始超级管理员")
 		return
 	}
-
-	query := database.DB.Where("id = ?", id)
-	if !IsSuperAdmin(c) {
-		query = query.Where("tenant_id = ?", tenantID)
+	if fmt.Sprint(homeTenantUserID(c)) == id {
+		Fail(c, http.StatusBadRequest, "不能删除当前登录的自己")
+		return
 	}
 
-	res := query.Delete(&model.User{})
+	res := database.DB.Where("id = ? AND tenant_id = ?", id, tenantID).Delete(&model.User{})
 	if res.RowsAffected == 0 {
-		Fail(c, http.StatusNotFound, "用户不存在或无权操作")
+		Fail(c, http.StatusNotFound, "用户不存在或不属于当前租户视角 (超级管理员请先切换租户视角)")
 		return
 	}
 	Ok(c, gin.H{"id": id, "deleted": true})
+}
+
+// maskedSecret 仅超级管理员可见明文密钥，其余角色一律脱敏
+func maskedSecret(secret string, visible bool) string {
+	if visible {
+		return secret
+	}
+	if secret == "" {
+		return ""
+	}
+	return "******"
+}
+
+// defaultTenantIDOrDefault 自动建号归属租户兜底：0 表示沿用配置所属租户，仍为空则回退默认租户 1
+func defaultTenantIDOrDefault(id uint, fallback uint) uint {
+	if id > 0 {
+		return id
+	}
+	if fallback > 0 {
+		return fallback
+	}
+	return 1
+}
+
+// tenantOptions 返回当前用户可见的租户选项 (超级管理员=全部启用租户，普通用户=本租户)
+func tenantOptions(c *gin.Context) []model.Tenant {
+	query := database.DB.Model(&model.Tenant{}).Where("status = 1")
+	if !IsSuperAdmin(c) {
+		query = query.Where("id = ?", GetHomeTenantID(c))
+	}
+	var tenants []model.Tenant
+	if err := query.Select("id", "name", "code", "status").Order("id asc").Find(&tenants).Error; err != nil {
+		return []model.Tenant{}
+	}
+	return tenants
+}
+
+// homeTenantUserID 获取当前登录用户 ID (用于防止超管把自己移出所属租户)
+func homeTenantUserID(c *gin.Context) uint {
+	v, exists := c.Get("user_id")
+	if !exists {
+		return 0
+	}
+	if id, ok := v.(uint); ok {
+		return id
+	}
+	return 0
 }
 
 // PublicIP 获取服务器公网出口 IP (多源并发探测 + 反向代理智能识别)
@@ -251,13 +378,13 @@ func (h *SystemHandler) PublicIP(c *gin.Context) {
 }
 
 type ComponentHealth struct {
-	Name        string `json:"name"`
-	Configured  bool   `json:"configured"`
-	Connected   bool   `json:"connected"`
-	Status      string `json:"status"` // connected, disconnected, not_configured
-	Target      string `json:"target"`
-	LatencyMs   int64  `json:"latency_ms"`
-	Details     string `json:"details,omitempty"`
+	Name       string `json:"name"`
+	Configured bool   `json:"configured"`
+	Connected  bool   `json:"connected"`
+	Status     string `json:"status"` // connected, disconnected, not_configured
+	Target     string `json:"target"`
+	LatencyMs  int64  `json:"latency_ms"`
+	Details    string `json:"details,omitempty"`
 }
 
 // HealthCheck 全面连通性与健康探测 (检测真实连接情况与延迟)
@@ -419,19 +546,28 @@ func (h *SystemHandler) GetOIDCSetting(c *gin.Context) {
 			"enabled":            cfg.Enabled,
 			"issuer":             cfg.Issuer,
 			"client_id":          cfg.ClientID,
-			"client_secret":      cfg.ClientSecret,
+			"client_secret":      maskedSecret(cfg.ClientSecret, IsSuperAdmin(c)),
 			"redirect_uri":       cfg.RedirectURI,
 			"suggested_redirect": suggestedRedirect,
 			"scopes":             scopesStr,
 			"auto_register":      cfg.AutoRegister,
 			"default_role":       cfg.DefaultRole,
+			"default_tenant_id":  defaultTenantIDOrDefault(cfg.DefaultTenantID, tenantID),
+			"tenants":            tenantOptions(c),
 		})
 		return
 	}
 
+	// 客户端密钥属于系统级凭据：仅超级管理员可见明文，其他角色一律脱敏，防止跨租户泄露
+	secretForView := ""
+	if IsSuperAdmin(c) {
+		secretForView = setting.ClientSecret
+	}
 	displaySecret := setting.ClientSecret
 	if len(displaySecret) > 8 {
 		displaySecret = displaySecret[:4] + "******" + displaySecret[len(displaySecret)-4:]
+	} else {
+		displaySecret = "******"
 	}
 
 	red := setting.RedirectURI
@@ -444,13 +580,15 @@ func (h *SystemHandler) GetOIDCSetting(c *gin.Context) {
 		"enabled":            setting.Enabled,
 		"issuer":             setting.Issuer,
 		"client_id":          setting.ClientID,
-		"client_secret":      setting.ClientSecret,
+		"client_secret":      secretForView,
 		"display_secret":     displaySecret,
 		"redirect_uri":       red,
 		"suggested_redirect": suggestedRedirect,
 		"scopes":             setting.Scopes,
 		"auto_register":      setting.AutoRegister,
 		"default_role":       setting.DefaultRole,
+		"default_tenant_id":  defaultTenantIDOrDefault(setting.DefaultTenantID, setting.TenantID),
+		"tenants":            tenantOptions(c),
 	})
 }
 
@@ -458,18 +596,41 @@ func (h *SystemHandler) GetOIDCSetting(c *gin.Context) {
 func (h *SystemHandler) SaveOIDCSetting(c *gin.Context) {
 	tenantID := GetTenantID(c)
 	var req struct {
-		Enabled      bool   `json:"enabled"`
-		Issuer       string `json:"issuer"`
-		ClientID     string `json:"client_id"`
-		ClientSecret string `json:"client_secret"`
-		RedirectURI  string `json:"redirect_uri"`
-		Scopes       string `json:"scopes"`
-		AutoRegister bool   `json:"auto_register"`
-		DefaultRole  string `json:"default_role"`
+		Enabled         bool   `json:"enabled"`
+		Issuer          string `json:"issuer"`
+		ClientID        string `json:"client_id"`
+		ClientSecret    string `json:"client_secret"`
+		RedirectURI     string `json:"redirect_uri"`
+		Scopes          string `json:"scopes"`
+		AutoRegister    bool   `json:"auto_register"`
+		DefaultRole     string `json:"default_role"`
+		DefaultTenantID *uint  `json:"default_tenant_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		Fail(c, http.StatusBadRequest, err.Error())
 		return
+	}
+
+	// OIDC 属于系统级单点登录凭据且会热更新全局配置，任何租户管理员改动都会影响全站登录，
+	// 因此这里硬性收口为超级管理员专用，避免跨租户提权与互相覆盖。
+	if !IsSuperAdmin(c) {
+		Fail(c, http.StatusForbidden, "越权操作：OIDC 单点登录为系统级配置，仅超级管理员可修改")
+		return
+	}
+
+	// 自动建号默认落在配置者自己的租户；跨租户指派仅超级管理员可为已启用租户设置
+	defaultTenantID := tenantID
+	if req.DefaultTenantID != nil && *req.DefaultTenantID > 0 {
+		if !IsSuperAdmin(c) {
+			Fail(c, http.StatusForbidden, "越权操作：仅超级管理员可以指定自动建号的归属租户")
+			return
+		}
+		validID, _, terr := resolveTargetTenantID(c, req.DefaultTenantID, 0)
+		if terr != nil {
+			Fail(c, http.StatusBadRequest, terr.Error())
+			return
+		}
+		defaultTenantID = validID
 	}
 
 	var setting model.SystemOIDCSetting
@@ -480,15 +641,16 @@ func (h *SystemHandler) SaveOIDCSetting(c *gin.Context) {
 			defRole = "operator"
 		}
 		setting = model.SystemOIDCSetting{
-			TenantID:     tenantID,
-			Enabled:      req.Enabled,
-			Issuer:       strings.TrimSpace(req.Issuer),
-			ClientID:     strings.TrimSpace(req.ClientID),
-			ClientSecret: strings.TrimSpace(req.ClientSecret),
-			RedirectURI:  strings.TrimSpace(req.RedirectURI),
-			Scopes:       strings.TrimSpace(req.Scopes),
-			AutoRegister: req.AutoRegister,
-			DefaultRole:  defRole,
+			TenantID:        tenantID,
+			DefaultTenantID: defaultTenantID,
+			Enabled:         req.Enabled,
+			Issuer:          strings.TrimSpace(req.Issuer),
+			ClientID:        strings.TrimSpace(req.ClientID),
+			ClientSecret:    strings.TrimSpace(req.ClientSecret),
+			RedirectURI:     strings.TrimSpace(req.RedirectURI),
+			Scopes:          strings.TrimSpace(req.Scopes),
+			AutoRegister:    req.AutoRegister,
+			DefaultRole:     defRole,
 		}
 		database.DB.Create(&setting)
 	} else {
@@ -506,6 +668,7 @@ func (h *SystemHandler) SaveOIDCSetting(c *gin.Context) {
 		if req.DefaultRole != "" {
 			setting.DefaultRole = req.DefaultRole
 		}
+		setting.DefaultTenantID = defaultTenantID
 		database.DB.Save(&setting)
 	}
 

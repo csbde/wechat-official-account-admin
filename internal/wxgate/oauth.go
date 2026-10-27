@@ -10,13 +10,13 @@ import (
 	"time"
 
 	"github.com/anchel/wechat-official-account-admin/config"
-	"github.com/anchel/wechat-official-account-admin/internal/logger"
-	"go.uber.org/zap"
 	"github.com/anchel/wechat-official-account-admin/internal/database"
+	"github.com/anchel/wechat-official-account-admin/internal/logger"
 	"github.com/anchel/wechat-official-account-admin/internal/model"
 	"github.com/anchel/wechat-official-account-admin/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/go-resty/resty/v2"
+	"go.uber.org/zap"
 )
 
 type OAuthHandler struct {
@@ -85,11 +85,11 @@ func (h *OAuthHandler) HandleAuthorize(c *gin.Context) {
 
 	// 若该公众号是由微信开放平台第三方代管授权接入，必须追加 component_appid 参数
 	// 否则微信会报错 10003 (redirect_uri域名与后台配置不一致)！
-	if account.AccountType == "authorized" && account.ComponentAppID != "" {
+	if account.IsThirdPartyManaged() {
 		wechatAuthURL += "&component_appid=" + account.ComponentAppID
 	}
 
-	wechatAuthURL += "#wechat_redirect" 
+	wechatAuthURL += "#wechat_redirect"
 
 	GetMonitor().RecordCall(appID, "/oauth2/authorize", false)
 
@@ -182,7 +182,7 @@ func (h *OAuthHandler) fetchUserInfo(ctx context.Context, account *model.WxAccou
 	var err error
 
 	// 1. 区分直连公众号与微信开放平台第三方代管公众号换取 OAuth2 令牌
-	if account.AccountType == "authorized" && account.ComponentAppID != "" {
+	if account.IsThirdPartyManaged() {
 		// 第三方平台代管模式: 必须调用 /sns/oauth2/component/access_token 接口
 		compToken, cErr := service.DefaultWxOpenService.GetComponentAccessToken(ctx, account.ComponentAppID)
 		if cErr != nil {

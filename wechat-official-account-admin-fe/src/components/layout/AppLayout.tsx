@@ -19,11 +19,12 @@ import {
   ShieldAlert,
   Zap,
   BellRing,
+  Building2,
 } from 'lucide-react'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore, WxAccount } from '@/stores/app'
 import { api } from '@/lib/api'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -42,8 +43,27 @@ interface AppLayoutProps {
 }
 
 export const AppLayout: React.FC<AppLayoutProps> = ({ currentTab, onTabChange, children }) => {
-  const { user, tenant, logout } = useAuthStore()
+  const queryClient = useQueryClient()
+  const { user, tenant, logout, activeTenantId, setActiveTenantId } = useAuthStore()
   const { currentApp, setCurrentApp, theme, toggleTheme } = useAppStore()
+  const isSuperAdmin = user?.role === 'superadmin'
+
+  // 租户列表 (仅超级管理员需要，用于跨租户代运营视角切换)
+  const { data: tenants } = useQuery<any[]>({
+    queryKey: ['system-tenants'],
+    queryFn: () => api.get('/api/system/tenants'),
+    enabled: isSuperAdmin,
+    retry: 0,
+  })
+  const viewTenant = activeTenantId ? tenants?.find((t) => t.id === activeTenantId) : null
+
+  const switchTenantView = (id: number | null) => {
+    if ((id ?? null) === (activeTenantId ?? null)) return
+    setActiveTenantId(id)
+    // 视角变更后上下文完全不同：清空已选公众号并刷新所有查询
+    setCurrentApp(null)
+    queryClient.invalidateQueries()
+  }
 
   // 获取所有公众号列表
   const { data: accounts } = useQuery<WxAccount[]>({
@@ -136,8 +156,91 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentTab, onTabChange, c
       <div className="flex-1 flex flex-col min-w-0">
         {/* 顶部 Header */}
         <header className="h-16 border-b border-border/60 bg-card/60 backdrop-blur-md px-6 flex items-center justify-between sticky top-0 z-30">
-          {/* 当前选中的公众号 Switcher */}
           <div className="flex items-center gap-3">
+            {/* 超级管理员：租户视角切换器 (后端严格校验目标租户存在且启用) */}
+            {isSuperAdmin && (tenants?.length ?? 0) > 0 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className={`h-10 px-3 gap-2 text-left border ${
+                      viewTenant
+                        ? 'border-amber-500/50 bg-amber-500/10 hover:bg-amber-500/15'
+                        : 'border-border bg-background'
+                    }`}
+                  >
+                    <Building2
+                      className={`h-4 w-4 shrink-0 ${viewTenant ? 'text-amber-600' : 'text-primary'}`}
+                    />
+                    <div className="flex flex-col text-left hidden sm:block">
+                      <span className="text-[10px] text-muted-foreground leading-none">
+                        {viewTenant ? '代管租户视角' : '我的租户'}
+                      </span>
+                      <span className="text-xs font-semibold leading-tight mt-0.5 max-w-[120px] truncate">
+                        {viewTenant ? viewTenant.name : tenant?.name || '默认组织'}
+                      </span>
+                    </div>
+                    <ChevronDown className="h-3.5 w-3.5 opacity-60" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-72">
+                  <DropdownMenuLabel className="text-xs text-muted-foreground">
+                    切换租户视角 (数据完全隔离)
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {tenants!.filter((t) => t.is_home).map((t) => (
+                    <DropdownMenuItem
+                      key={`home-${t.id}`}
+                      onClick={() => switchTenantView(null)}
+                      className={`cursor-pointer py-2 ${!activeTenantId ? 'bg-primary/10 font-semibold text-primary' : ''}`}
+                    >
+                      <div className="flex flex-col truncate pr-2">
+                        <span className="truncate text-sm">{t.name} (本租户)</span>
+                        <span className="text-[10px] text-muted-foreground font-mono">
+                          {t.code} · {t.account_count} 个账号 / {t.user_count} 个用户
+                        </span>
+                      </div>
+                    </DropdownMenuItem>
+                  ))}
+                  {tenants!
+                    .filter((t) => !t.is_home)
+                    .map((t) => (
+                      <DropdownMenuItem
+                        key={t.id}
+                        disabled={t.status !== 1}
+                        onClick={() => switchTenantView(t.id)}
+                        className={`cursor-pointer py-2 ${
+                          activeTenantId === t.id ? 'bg-amber-500/15 font-semibold text-amber-700' : ''
+                        }`}
+                      >
+                        <div className="flex flex-col truncate pr-2">
+                          <span className="truncate text-sm flex items-center gap-1.5">
+                            {t.name}
+                            {t.status !== 1 && (
+                              <Badge variant="destructive" className="text-[9px]">
+                                停用
+                              </Badge>
+                            )}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground font-mono">
+                            {t.code} · {t.account_count} 个账号 / {t.user_count} 个用户
+                          </span>
+                        </div>
+                      </DropdownMenuItem>
+                    ))}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={() => onTabChange('system')}
+                    className="cursor-pointer gap-2 text-primary font-medium"
+                  >
+                    <Building2 className="h-4 w-4" />
+                    <span>管理租户与组织</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+
+            {/* 当前选中的公众号 Switcher */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" className="h-10 px-3.5 border-dashed border-primary/40 bg-primary/5 hover:bg-primary/10 gap-2.5 text-left">
@@ -184,6 +287,21 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentTab, onTabChange, c
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+
+            {viewTenant && (
+              <div className="hidden lg:flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300 bg-amber-500/10 px-3 py-1.5 rounded-lg border border-amber-500/25">
+                <ShieldAlert className="h-4 w-4" />
+                <span>
+                  正在以租户「{viewTenant.name}」视角管理数据
+                </span>
+                <button
+                  onClick={() => switchTenantView(null)}
+                  className="underline font-semibold hover:text-amber-900"
+                >
+                  返回本租户
+                </button>
+              </div>
+            )}
 
             {!currentApp && (
               <div className="hidden md:flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400 bg-amber-500/10 px-3 py-1.5 rounded-lg border border-amber-500/20">

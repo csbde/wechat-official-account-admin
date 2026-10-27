@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strings"
 
-	"time"
 	"github.com/anchel/wechat-official-account-admin/internal/cache"
 	"github.com/anchel/wechat-official-account-admin/internal/database"
 	"github.com/anchel/wechat-official-account-admin/internal/logger"
@@ -14,6 +13,7 @@ import (
 	"github.com/anchel/wechat-official-account-admin/internal/service"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
+	"time"
 )
 
 type OpenComponentHandler struct{}
@@ -23,10 +23,9 @@ func (h *OpenComponentHandler) GetComponent(c *gin.Context) {
 	tenantID := GetTenantID(c)
 	var comp model.WxOpenComponent
 
-	query := database.DB.Model(&model.WxOpenComponent{})
-	if !IsSuperAdmin(c) {
-		query = query.Where("tenant_id = ?", tenantID)
-	}
+	// 与保存/授权流程保持一致：严格按当前租户视角读取，超级管理员需先切换租户视角，
+	// 否则会看到别的平台的凭证配置而写到本租户，造成排查困难。
+	query := database.DB.Model(&model.WxOpenComponent{}).Where("tenant_id = ?", tenantID)
 
 	if err := query.First(&comp).Error; err != nil {
 		Ok(c, nil)
@@ -154,7 +153,7 @@ func (h *OpenComponentHandler) AuthCallback(c *gin.Context) {
 		logger.Warn("[扫码授权回调] QueryAuth 警告", zap.Error(err))
 		// 即使接口报错，检查是否后台事件已提前把该账号存入数据库
 		var existing model.WxAccount
-		if dbErr := database.DB.Where("tenant_id = ? AND account_type = 'authorized'", tenantID).Order("updated_at desc").First(&existing).Error; dbErr == nil {
+		if dbErr := database.DB.Where("tenant_id = ? AND component_app_id <> '' AND account_type IN ?", tenantID, []string{"authorized", "miniprogram"}).Order("updated_at desc").First(&existing).Error; dbErr == nil {
 			account = &existing
 			err = nil
 		}

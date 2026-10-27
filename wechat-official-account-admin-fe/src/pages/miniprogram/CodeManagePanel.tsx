@@ -65,17 +65,17 @@ export const CodeManagePanel: React.FC = () => {
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['mini-code', targetApp] })
 
   /* --------------------------- 账号候选列表 --------------------------- */
-  const { data: apps } = useQuery<any[]>({
-    queryKey: ['miniprogram-apps'],
-    queryFn: () => api.get('/api/miniprogram/apps'),
+  // kind=miniprogram: 后端只返回真正的小程序账号，避免把公众号混进「目标小程序」列表
+  const { data: apps, isLoading: loadingApps } = useQuery<any[]>({
+    queryKey: ['miniprogram-apps', 'miniprogram'],
+    queryFn: () => api.get('/api/miniprogram/apps?kind=miniprogram'),
   })
 
   React.useEffect(() => {
-    if (!targetApp && apps?.length) {
-      const mp = apps.find((a: any) => a.account_type === 'miniprogram')
-      if (mp) setTargetApp(mp.appid)
-    }
+    if (!targetApp && apps?.length) setTargetApp(apps[0].appid)
   }, [apps, targetApp])
+
+  const targetAccount = (apps || []).find((a: any) => a.appid === targetApp)
 
   /* ------------------------------ 查询 ------------------------------ */
   const { data: latestAudit, isFetching: fetchingAudit } = useQuery<any>({
@@ -261,13 +261,29 @@ export const CodeManagePanel: React.FC = () => {
               onChange={(e) => setTargetApp(e.target.value)}
               className="w-full h-9 rounded-lg border border-input bg-background px-2.5 text-xs"
             >
-              <option value="">请选择要管理代码的小程序...</option>
+              <option value="">
+                {loadingApps ? '正在加载小程序列表...' : (apps || []).length ? '请选择要管理代码的小程序...' : '当前租户下暂无小程序账号'}
+              </option>
               {(apps || []).map((a: any) => (
                 <option key={a.appid} value={a.appid}>
                   {a.name} · {a.appid} · {ACCOUNT_TYPE_LABEL[a.account_type] || a.account_type}
+                  {a.managed ? '' : ' (未托管，凭据不可用)'}
                 </option>
               ))}
             </select>
+            {(apps || []).length === 0 && !loadingApps && (
+              <div className="text-[11px] text-amber-700 dark:text-amber-400 leading-relaxed pt-1">
+                代码发布管理只作用于<strong>小程序</strong>账号。可先在「微信小程序 → 快速注册小程序」免认证费开通，
+                或在「公众号与开放平台」用<strong>微信扫码一键授权</strong>把已有小程序托管给第三方平台
+                (微信官方档案中存在 MiniProgramInfo 时系统会自动识别为小程序)。
+              </div>
+            )}
+            {targetAccount && !targetAccount.managed && (
+              <div className="text-[11px] text-red-600 leading-relaxed pt-1">
+                该小程序尚未绑定第三方平台 (缺少 authorizer_refresh_token)，提交代码 / 提审 / 发布等接口无法取得调用凭据，
+                请先完成扫码授权托管。
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-2">
             {targetApp && <Badge variant="outline" className="font-mono text-[11px]">{targetApp}</Badge>}
