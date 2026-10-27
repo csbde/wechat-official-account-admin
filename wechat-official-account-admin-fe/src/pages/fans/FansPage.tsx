@@ -645,7 +645,7 @@ export const FansPage: React.FC = () => {
 
       {/* 单用户标签管理弹窗 (重点解决无法打标签问题！) */}
       <Dialog open={singleTagModalOpen} onOpenChange={setSingleTagModalOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Tag className="h-4 w-4 text-emerald-600" />
@@ -716,7 +716,7 @@ export const FansPage: React.FC = () => {
 
       {/* 备注修改弹窗 */}
       <Dialog open={remarkModalOpen} onOpenChange={setRemarkModalOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>设置用户备注名</DialogTitle>
           </DialogHeader>
@@ -748,7 +748,7 @@ export const FansPage: React.FC = () => {
 
       {/* 微信标签管理弹窗 */}
       <Dialog open={tagModalOpen} onOpenChange={setTagModalOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>微信官方粉丝标签管理</DialogTitle>
           </DialogHeader>

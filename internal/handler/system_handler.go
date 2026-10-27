@@ -423,6 +423,8 @@ func (h *SystemHandler) GetOIDCSetting(c *gin.Context) {
 			"redirect_uri":       cfg.RedirectURI,
 			"suggested_redirect": suggestedRedirect,
 			"scopes":             scopesStr,
+			"auto_register":      cfg.AutoRegister,
+			"default_role":       cfg.DefaultRole,
 		})
 		return
 	}
@@ -447,6 +449,8 @@ func (h *SystemHandler) GetOIDCSetting(c *gin.Context) {
 		"redirect_uri":       red,
 		"suggested_redirect": suggestedRedirect,
 		"scopes":             setting.Scopes,
+		"auto_register":      setting.AutoRegister,
+		"default_role":       setting.DefaultRole,
 	})
 }
 
@@ -460,6 +464,8 @@ func (h *SystemHandler) SaveOIDCSetting(c *gin.Context) {
 		ClientSecret string `json:"client_secret"`
 		RedirectURI  string `json:"redirect_uri"`
 		Scopes       string `json:"scopes"`
+		AutoRegister bool   `json:"auto_register"`
+		DefaultRole  string `json:"default_role"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		Fail(c, http.StatusBadRequest, err.Error())
@@ -469,6 +475,10 @@ func (h *SystemHandler) SaveOIDCSetting(c *gin.Context) {
 	var setting model.SystemOIDCSetting
 	err := database.DB.Where("tenant_id = ?", tenantID).First(&setting).Error
 	if err != nil {
+		defRole := req.DefaultRole
+		if defRole == "" {
+			defRole = "operator"
+		}
 		setting = model.SystemOIDCSetting{
 			TenantID:     tenantID,
 			Enabled:      req.Enabled,
@@ -477,6 +487,8 @@ func (h *SystemHandler) SaveOIDCSetting(c *gin.Context) {
 			ClientSecret: strings.TrimSpace(req.ClientSecret),
 			RedirectURI:  strings.TrimSpace(req.RedirectURI),
 			Scopes:       strings.TrimSpace(req.Scopes),
+			AutoRegister: req.AutoRegister,
+			DefaultRole:  defRole,
 		}
 		database.DB.Create(&setting)
 	} else {
@@ -489,6 +501,10 @@ func (h *SystemHandler) SaveOIDCSetting(c *gin.Context) {
 		setting.RedirectURI = strings.TrimSpace(req.RedirectURI)
 		if req.Scopes != "" {
 			setting.Scopes = strings.TrimSpace(req.Scopes)
+		}
+		setting.AutoRegister = req.AutoRegister
+		if req.DefaultRole != "" {
+			setting.DefaultRole = req.DefaultRole
 		}
 		database.DB.Save(&setting)
 	}

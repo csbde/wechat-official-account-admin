@@ -641,7 +641,7 @@ export const AutoReplyPage: React.FC = () => {
 
       {/* 固定规则新增/编辑 Modal */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {editingRule ? '编辑自动回复规则' : ruleType === 'keyword' ? '新建关键词规则' : '设置系统回复'}

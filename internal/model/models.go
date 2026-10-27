@@ -253,6 +253,8 @@ type SystemOIDCSetting struct {
 	ClientSecret string         `gorm:"size:255" json:"client_secret"`
 	RedirectURI  string         `gorm:"size:255" json:"redirect_uri"`
 	Scopes       string         `gorm:"size:255;default:'openid profile email'" json:"scopes"`
+	AutoRegister bool           `gorm:"default:false" json:"auto_register"`        // 是否允许未录入邮箱自动创建账号 (默认关闭，防止非授权人员获取权限)
+	DefaultRole  string         `gorm:"size:32;default:'operator'" json:"default_role"` // 自动注册账号时的默认权限角色 (operator / viewer)
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
 	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`

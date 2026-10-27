@@ -279,8 +279,32 @@ func (s *OIDCService) HandleCallback(ctx context.Context, code, host string) (*m
 		}
 	}
 
-	// 规则 3：若均未找到，自动创建新用户并关联邮箱与租户 (默认赋予租户管理员角色)
+	// 规则 3：若均未匹配到已有用户
 	if !found {
+		// 查询数据库中是否开启了“允许自动创建新账号”开关
+		autoRegister := cfg.AutoRegister
+		defaultRole := cfg.DefaultRole
+		if defaultRole == "" {
+			defaultRole = "operator"
+		}
+
+		var dbSetting model.SystemOIDCSetting
+		if err := database.DB.Where("enabled = ?", true).First(&dbSetting).Error; err == nil {
+			autoRegister = dbSetting.AutoRegister
+			if dbSetting.DefaultRole != "" {
+				defaultRole = dbSetting.DefaultRole
+			}
+		}
+
+		// 安全保护：若未开启自动注册，拒绝未经授权的新用户登录
+		if !autoRegister {
+			userIdentifier := oidcUser.Email
+			if userIdentifier == "" {
+				userIdentifier = oidcUser.Sub
+			}
+			return nil, "", fmt.Errorf("您的认证身份 [%s] 尚未在系统中开通账号，系统未开启自动建号，请联系管理员在用户管理中为您添加并绑定该邮箱", userIdentifier)
+		}
+
 		username := oidcUser.PreferredUsername
 		if username == "" && oidcUser.Email != "" {
 			username = strings.Split(oidcUser.Email, "@")[0]
@@ -300,6 +324,11 @@ func (s *OIDCService) HandleCallback(ctx context.Context, code, host string) (*m
 			nickname = username
 		}
 
+		// 确保不能越权成为 superadmin
+		if defaultRole == "superadmin" || defaultRole == "admin" {
+			defaultRole = "operator"
+		}
+
 		hash, _ := bcrypt.GenerateFromPassword([]byte("oidc_user@2025"), bcrypt.DefaultCost)
 		user = model.User{
 			TenantID:   1,
@@ -307,13 +336,13 @@ func (s *OIDCService) HandleCallback(ctx context.Context, code, host string) (*m
 			Email:      oidcUser.Email,
 			Password:   string(hash),
 			Nickname:   nickname,
-			Role:       "admin", // 企业 OIDC 用户享有租户管理员权限
+			Role:       defaultRole, // 严格按照设定的权限创建 (operator 或 viewer)
 			Status:     1,
 			OIDCIssuer: cfg.Issuer,
 			OIDCSub:    oidcUser.Sub,
 		}
 		database.DB.Create(&user)
-		logger.Info("OIDC: New user created and bound", zap.String("email", user.Email), zap.Uint("user_id", user.ID))
+		logger.Info("OIDC: New user created and bound with role", zap.String("email", user.Email), zap.String("role", defaultRole), zap.Uint("user_id", user.ID))
 	}
 
 	// 下发本系统的 JWT Token

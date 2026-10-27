@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/anchel/wechat-official-account-admin/config"
+	"github.com/anchel/wechat-official-account-admin/internal/logger"
+	"go.uber.org/zap"
 	"github.com/anchel/wechat-official-account-admin/internal/database"
 	"github.com/anchel/wechat-official-account-admin/internal/model"
 	"github.com/anchel/wechat-official-account-admin/internal/service"
@@ -122,21 +124,60 @@ func (h *OAuthHandler) HandleCallback(c *gin.Context) {
 		return
 	}
 
-	// 服务端向微信换取 oauth2 access_token 与 openid
-	userInfoSafe, err := h.fetchUserInfo(c.Request.Context(), &account, code)
-	// 无论获取用户信息是否成功，完成后均清理单次会话
+	// 服务端向微信换取 oauth2 access_token 与用户信息
+	userInfoSafe, err := h.fetchUserInfo(c.Request.Context(), &account, code, session.Scope)
+	if err != nil {
+		logger.Warn("[WXGate] 换取微信用户信息失败", zap.String("appid", session.AppID), zap.Error(err))
+
+		// 如果明确要求了 snsapi_userinfo (弹窗获取完整用户信息)，但未获取到真实授权资料
+		if strings.Contains(session.Scope, "snsapi_userinfo") {
+			// 提供友好微信授权重试页面，附带微信官方 forcePopup=true 强制重新弹出绿色授权按钮
+			retryAuthURL := fmt.Sprintf("/connect/oauth2/authorize?appid=%s&redirect_uri=%s&response_type=code&scope=%s&state=%s&forcePopup=true",
+				session.AppID,
+				url.QueryEscape(session.OriginalRedirectURI),
+				session.Scope,
+				session.OriginalState,
+			)
+
+			c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(fmt.Sprintf(`<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>请确认微信登录授权</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; background: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; }
+    .card { background: #fff; border-radius: 16px; padding: 32px 24px; max-width: 380px; width: 100%%; text-align: center; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.08); border: 1px solid #e2e8f0; }
+    .icon { width: 56px; height: 56px; margin: 0 auto 16px; border-radius: 50%%; background: #ecfdf5; display: flex; align-items: center; justify-content: center; color: #059669; font-size: 28px; }
+    h3 { margin: 0 0 8px; font-size: 18px; color: #0f172a; }
+    p { margin: 0 0 24px; font-size: 13px; color: #64748b; line-height: 1.5; }
+    .btn { display: block; width: 100%%; padding: 12px 0; border-radius: 10px; background: #07c160; color: #fff; text-decoration: none; font-weight: 600; font-size: 15px; border: none; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">💬</div>
+    <h3>需要您的授权同意</h3>
+    <p>为保障业务系统获取完整的昵称与头像个人资料，请点击下方按钮完成微信授权确认。</p>
+    <a href="%s" class="btn">前往点击微信授权按钮</a>
+  </div>
+</body>
+</html>`, retryAuthURL)))
+			return
+		}
+	}
+
+	// 授权确认完成，清理单次会话
 	sm.DeleteSession(sessionID)
 
-	// 拼接业务方原本的 redirect_uri 并附带 code、state 与脱敏后的 user_info
+	// 只有在真正获取到授权信息后，才带上完整的 user_info 拼装并重定向回用户的实际业务跳转地址！
 	finalRedirectURL := h.buildFinalRedirect(session.OriginalRedirectURI, code, session.OriginalState, userInfoSafe)
 
 	GetMonitor().RecordCall(session.AppID, "/oauth2/callback", err != nil)
-
-	// 重定向回用户的业务页面
 	c.Redirect(http.StatusFound, finalRedirectURL)
 }
 
-func (h *OAuthHandler) fetchUserInfo(ctx context.Context, account *model.WxAccount, code string) (*UserInfoSafe, error) {
+func (h *OAuthHandler) fetchUserInfo(ctx context.Context, account *model.WxAccount, code, scope string) (*UserInfoSafe, error) {
 	var resp *resty.Response
 	var err error
 
@@ -183,15 +224,35 @@ func (h *OAuthHandler) fetchUserInfo(ctx context.Context, account *model.WxAccou
 		UnionID: tokenRes.UnionID,
 	}
 
-	// 2. 如果包含 snsapi_userinfo 权限，自动拉取用户信息
-	if strings.Contains(tokenRes.Scope, "snsapi_userinfo") {
+	// 2. 如果要求 snsapi_userinfo 权限，必须向微信官方拉取完整的用户真实资料
+	if strings.Contains(scope, "snsapi_userinfo") || strings.Contains(tokenRes.Scope, "snsapi_userinfo") {
 		userURL := fmt.Sprintf("https://api.weixin.qq.com/sns/userinfo?access_token=%s&openid=%s&lang=zh_CN", tokenRes.AccessToken, tokenRes.OpenID)
 		userResp, err := h.http.R().SetContext(ctx).Get(userURL)
-		if err == nil {
-			var u UserInfoSafe
-			if err := json.Unmarshal(userResp.Body(), &u); err == nil && u.OpenID != "" {
-				safeUser = &u
-			}
+		if err != nil {
+			return nil, fmt.Errorf("拉取微信用户信息网络失败: %w", err)
+		}
+
+		var u struct {
+			UserInfoSafe
+			Errcode int    `json:"errcode"`
+			Errmsg  string `json:"errmsg"`
+		}
+		if err := json.Unmarshal(userResp.Body(), &u); err != nil {
+			return nil, fmt.Errorf("解析微信用户信息失败: %w", err)
+		}
+		if u.Errcode != 0 {
+			return nil, fmt.Errorf("微信接口返回未授权错误: [%d] %s", u.Errcode, u.Errmsg)
+		}
+
+		if u.OpenID != "" {
+			safeUser.Nickname = u.Nickname
+			safeUser.Sex = u.Sex
+			safeUser.City = u.City
+			safeUser.Province = u.Province
+			safeUser.Country = u.Country
+			safeUser.Headimgurl = u.Headimgurl
+			safeUser.UnionID = u.UnionID
+			safeUser.Privilege = u.Privilege
 		}
 	}
 

@@ -468,7 +468,7 @@ export const AccountsPage: React.FC = () => {
 
       {/* 微信开放平台第三方配置 Modal */}
       <Dialog open={openComponentModal} onOpenChange={setOpenComponentModal}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>微信开放平台 (第三方平台) 配置</DialogTitle>
           </DialogHeader>

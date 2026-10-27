@@ -84,6 +84,8 @@ type OIDCConfig struct {
 	ClientSecret string   `mapstructure:"client_secret"`
 	RedirectURI  string   `mapstructure:"redirect_uri"`
 	Scopes       []string `mapstructure:"scopes"`
+	AutoRegister bool     `mapstructure:"auto_register"` // 是否允许自动注册新账号 (默认 false)
+	DefaultRole  string   `mapstructure:"default_role"`  // 自动创建时的默认角色 (默认 operator)
 }
 
 type WechatConfig struct {
@@ -162,6 +164,8 @@ func Load(configPath string) (*Config, error) {
 	v.SetDefault("oidc.client_secret", "")
 	v.SetDefault("oidc.redirect_uri", "")
 	v.SetDefault("oidc.scopes", []string{"openid", "profile", "email"})
+	v.SetDefault("oidc.auto_register", false)
+	v.SetDefault("oidc.default_role", "operator")
 
 	v.SetDefault("telemetry.service_name", "wechat-official-account-admin")
 	v.SetDefault("telemetry.environment", "development")

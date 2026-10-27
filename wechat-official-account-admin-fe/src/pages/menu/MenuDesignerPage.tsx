@@ -634,7 +634,7 @@ export const MenuDesignerPage: React.FC = () => {
 
       {/* 新建个性化菜单弹窗 */}
       <Dialog open={condModalOpen} onOpenChange={setCondModalOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>新建个性化条件菜单</DialogTitle>
           </DialogHeader>

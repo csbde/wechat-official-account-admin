@@ -59,6 +59,8 @@ export const SystemPage: React.FC = () => {
   const [oidcClientSecret, setOidcClientSecret] = useState('')
   const [oidcRedirectUri, setOidcRedirectUri] = useState('')
   const [oidcScopes, setOidcScopes] = useState('openid profile email')
+  const [oidcAutoRegister, setOidcAutoRegister] = useState(false)
+  const [oidcDefaultRole, setOidcDefaultRole] = useState('operator')
   const [testResult, setTestResult] = useState<any>(null)
   const [testingOIDC, setTestingOIDC] = useState(false)
 
@@ -88,6 +90,8 @@ export const SystemPage: React.FC = () => {
       setOidcClientSecret(oidcConfig.client_secret || '')
       setOidcRedirectUri(oidcConfig.redirect_uri || oidcConfig.suggested_redirect || '')
       setOidcScopes(oidcConfig.scopes || 'openid profile email')
+      setOidcAutoRegister(!!oidcConfig.auto_register)
+      setOidcDefaultRole(oidcConfig.default_role || 'operator')
     }
   }, [oidcConfig])
 
@@ -387,7 +391,7 @@ export const SystemPage: React.FC = () => {
 
       {/* OIDC 企业单点登录配置 Modal (重点功能！) */}
       <Dialog open={oidcModalOpen} onOpenChange={setOidcModalOpen}>
-        <DialogContent className="sm:max-w-xl">
+        <DialogContent className="sm:max-w-xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Fingerprint className="h-5 w-5 text-emerald-600" />
@@ -495,6 +499,33 @@ export const SystemPage: React.FC = () => {
               />
             </div>
 
+            {/* 自动创建账号安全策略 (重点配置) */}
+            <div className="p-3 rounded-xl border bg-muted/40 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="font-semibold text-foreground">允许未录入邮箱自动创建账号</div>
+                  <div className="text-muted-foreground text-[11px] mt-0.5">
+                    若关闭 (推荐)，未在用户列表中录入该邮箱的外部人员将无法登录；若开启，将自动注册新账号
+                  </div>
+                </div>
+                <Switch checked={oidcAutoRegister} onCheckedChange={setOidcAutoRegister} />
+              </div>
+
+              {oidcAutoRegister && (
+                <div className="space-y-1.5 pt-2 border-t border-border/50">
+                  <label className="font-semibold text-foreground">自动创建时的默认权限角色 (严禁直接赋予管理员)</label>
+                  <select
+                    value={oidcDefaultRole}
+                    onChange={(e) => setOidcDefaultRole(e.target.value)}
+                    className="w-full h-8 rounded-lg border border-input bg-background px-2.5 text-xs text-foreground"
+                  >
+                    <option value="operator">Operator (普通操作员 - 仅公众号日常业务权限)</option>
+                    <option value="viewer">Viewer (只读访客 - 仅查看数据权限)</option>
+                  </select>
+                </div>
+              )}
+            </div>
+
             <DialogFooter className="pt-2">
               <Button type="button" variant="outline" onClick={() => setOidcModalOpen(false)}>
                 取消
@@ -509,6 +540,8 @@ export const SystemPage: React.FC = () => {
                     client_secret: oidcClientSecret,
                     redirect_uri: oidcRedirectUri,
                     scopes: oidcScopes,
+                    auto_register: oidcAutoRegister,
+                    default_role: oidcDefaultRole,
                   })
                 }
                 disabled={saveOidcMutation.isPending}
@@ -523,7 +556,7 @@ export const SystemPage: React.FC = () => {
 
       {/* 用户编辑/创建弹窗 */}
       <Dialog open={userModalOpen} onOpenChange={setUserModalOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingUserId ? '修改用户信息与密码' : '创建新后台用户'}</DialogTitle>
           </DialogHeader>

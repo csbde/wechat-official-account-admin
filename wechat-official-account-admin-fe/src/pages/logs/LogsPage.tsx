@@ -176,7 +176,7 @@ export const LogsPage: React.FC = () => {
 
       {/* 日志详情弹窗 */}
       <Dialog open={!!viewLog} onOpenChange={() => setViewLog(null)}>
-        <DialogContent className="sm:max-w-xl">
+        <DialogContent className="sm:max-w-xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 font-mono text-sm">
               <Badge variant="outline">{viewLog?.method}</Badge>
