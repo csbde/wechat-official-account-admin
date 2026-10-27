@@ -14,8 +14,8 @@
 - **设计体验**: 微信绿主题系统、支持深色/浅色模式切换、高仿真微信手机端自定义菜单设计器
 
 ### 后端技术栈
-- **语言与 Web 框架**: Go 1.23 + Gin (RESTful API 架构)
-- **数据库 ORM**: GORM + PostgreSQL
+- **语言与 Web 框架**: Go 1.26+ + Gin (RESTful API 架构)
+- **数据库 ORM**: GORM (默认 SQLite / 可选 PostgreSQL 双引擎)
 - **高速缓存**: Redis (AccessToken 分布式缓存与提前续期)
 - **后台异步任务**: Asynq (分布式延迟/重试任务队列，处理粉丝批量同步、素材下载等)
 - **访问控制**: Casbin (基于 RBAC 的动态角色访问控制，策略持久化至 PostgreSQL)

@@ -18,18 +18,12 @@ type LoginRequest struct {
 }
 
 type LoginResponse struct {
-	Token string      `json:"token"`
-	User  *model.User `json:"user"`
+	Token  string        `json:"token"`
+	User   *model.User   `json:"user"`
+	Tenant *model.Tenant `json:"tenant,omitempty"`
 }
 
 // Login 用户密码登录
-// @Summary 用户登录
-// @Tags 认证管理
-// @Accept json
-// @Produce json
-// @Param req body LoginRequest true "登录参数"
-// @Success 200 {object} Response{data=LoginResponse}
-// @Router /api/auth/login [post]
 func (h *AuthHandler) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -53,25 +47,26 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	token, err := auth.GenerateToken(user.ID, user.Username, user.Role, user.SSOProvider)
+	// 查询租户
+	var tenant model.Tenant
+	if user.TenantID > 0 {
+		database.DB.First(&tenant, user.TenantID)
+	}
+
+	token, err := auth.GenerateToken(user.ID, user.TenantID, user.Username, user.Role, user.SSOProvider)
 	if err != nil {
 		Fail(c, http.StatusInternalServerError, "生成令牌失败")
 		return
 	}
 
 	Ok(c, LoginResponse{
-		Token: token,
-		User:  &user,
+		Token:  token,
+		User:   &user,
+		Tenant: &tenant,
 	})
 }
 
-// UserInfo 获取当前登录用户信息
-// @Summary 获取当前用户信息
-// @Tags 认证管理
-// @Security BearerAuth
-// @Produce json
-// @Success 200 {object} Response{data=model.User}
-// @Router /api/auth/userinfo [get]
+// UserInfo 获取当前登录用户信息及所属租户
 func (h *AuthHandler) UserInfo(c *gin.Context) {
 	userID, _ := c.Get("user_id")
 	var user model.User
@@ -79,26 +74,24 @@ func (h *AuthHandler) UserInfo(c *gin.Context) {
 		Fail(c, http.StatusNotFound, "用户不存在")
 		return
 	}
-	Ok(c, user)
+
+	var tenant model.Tenant
+	if user.TenantID > 0 {
+		database.DB.First(&tenant, user.TenantID)
+	}
+
+	Ok(c, gin.H{
+		"user":   user,
+		"tenant": tenant,
+	})
 }
 
 // Logout 退出登录
-// @Summary 用户登出
-// @Tags 认证管理
-// @Security BearerAuth
-// @Produce json
-// @Success 200 {object} Response
-// @Router /api/auth/logout [post]
 func (h *AuthHandler) Logout(c *gin.Context) {
 	Ok(c, gin.H{"status": "logged_out"})
 }
 
 // SSOCallback 单点登录授权回调
-// @Summary SSO 单点登录对接
-// @Tags 认证管理
-// @Accept json
-// @Produce json
-// @Router /api/auth/sso/callback [post]
 func (h *AuthHandler) SSOCallback(c *gin.Context) {
 	var req struct {
 		Provider string `json:"provider"`
@@ -109,11 +102,11 @@ func (h *AuthHandler) SSOCallback(c *gin.Context) {
 		return
 	}
 
-	// 演示 SSO 自动映射/创建用户逻辑
 	var user model.User
 	err := database.DB.Where("sso_provider = ? AND sso_uid = ?", req.Provider, req.Code).First(&user).Error
 	if err != nil {
 		user = model.User{
+			TenantID:    1,
 			Username:    "sso_" + req.Code,
 			Nickname:    "SSO User",
 			Role:        "operator",
@@ -126,6 +119,9 @@ func (h *AuthHandler) SSOCallback(c *gin.Context) {
 		database.DB.Create(&user)
 	}
 
-	token, _ := auth.GenerateToken(user.ID, user.Username, user.Role, user.SSOProvider)
-	Ok(c, LoginResponse{Token: token, User: &user})
+	var tenant model.Tenant
+	database.DB.First(&tenant, user.TenantID)
+
+	token, _ := auth.GenerateToken(user.ID, user.TenantID, user.Username, user.Role, user.SSOProvider)
+	Ok(c, LoginResponse{Token: token, User: &user, Tenant: &tenant})
 }

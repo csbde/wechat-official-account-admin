@@ -32,22 +32,23 @@ type UpdateAccountRequest struct {
 	Enabled        *bool  `json:"enabled"`
 }
 
-// List 获取公众号列表
-// @Summary 获取所有配置的微信公众号
-// @Tags 公众号管理
-// @Security BearerAuth
-// @Produce json
-// @Router /api/accounts [get]
+// List 获取当前租户下的所有公众号
 func (h *AccountHandler) List(c *gin.Context) {
+	tenantID := GetTenantID(c)
 	var list []model.WxAccount
-	if err := database.DB.Order("is_default desc, id desc").Find(&list).Error; err != nil {
+
+	query := database.DB.Model(&model.WxAccount{})
+	if !IsSuperAdmin(c) {
+		query = query.Where("tenant_id = ?", tenantID)
+	}
+
+	if err := query.Order("is_default desc, id desc").Find(&list).Error; err != nil {
 		Fail(c, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	// 非 admin 角色遮蔽 appsecret 等密钥
 	role, _ := c.Get("role")
-	isAdmin := role == "admin"
+	isAdmin := role == "admin" || role == "superadmin"
 
 	type AccountVO struct {
 		model.WxAccount
@@ -75,14 +76,9 @@ func (h *AccountHandler) List(c *gin.Context) {
 	Ok(c, result)
 }
 
-// Create 新建微信公众号
-// @Summary 添加新公众号
-// @Tags 公众号管理
-// @Security BearerAuth
-// @Accept json
-// @Produce json
-// @Router /api/accounts [post]
+// Create 新建微信公众号 (强制绑定当前租户)
 func (h *AccountHandler) Create(c *gin.Context) {
+	tenantID := GetTenantID(c)
 	var req CreateAccountRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		Fail(c, http.StatusBadRequest, err.Error())
@@ -90,16 +86,17 @@ func (h *AccountHandler) Create(c *gin.Context) {
 	}
 
 	var count int64
-	database.DB.Model(&model.WxAccount{}).Where("app_id = ?", req.AppID).Count(&count)
+	database.DB.Model(&model.WxAccount{}).Where("app_id = ? AND tenant_id = ?", req.AppID, tenantID).Count(&count)
 	if count > 0 {
-		Fail(c, http.StatusBadRequest, "该 AppID 已存在")
+		Fail(c, http.StatusBadRequest, "该 AppID 在当前租户下已存在")
 		return
 	}
 
 	var total int64
-	database.DB.Model(&model.WxAccount{}).Count(&total)
+	database.DB.Model(&model.WxAccount{}).Where("tenant_id = ?", tenantID).Count(&total)
 
 	account := model.WxAccount{
+		TenantID:       tenantID, // 强制隔离归属
 		Name:           req.Name,
 		AppID:          req.AppID,
 		AppSecret:      req.AppSecret,
@@ -108,7 +105,7 @@ func (h *AccountHandler) Create(c *gin.Context) {
 		OriginalID:     req.OriginalID,
 		Description:    req.Description,
 		Enabled:        true,
-		IsDefault:      total == 0, // 第一个自动设为默认
+		IsDefault:      total == 0,
 	}
 
 	if err := database.DB.Create(&account).Error; err != nil {
@@ -119,18 +116,19 @@ func (h *AccountHandler) Create(c *gin.Context) {
 	Ok(c, account)
 }
 
-// Update 更新微信公众号
-// @Summary 更新公众号配置
-// @Tags 公众号管理
-// @Security BearerAuth
-// @Accept json
-// @Produce json
-// @Router /api/accounts/{id} [put]
+// Update 更新公众号配置 (防越权校验)
 func (h *AccountHandler) Update(c *gin.Context) {
+	tenantID := GetTenantID(c)
 	id := c.Param("id")
+
 	var account model.WxAccount
-	if err := database.DB.First(&account, id).Error; err != nil {
-		Fail(c, http.StatusNotFound, "公众号不存在")
+	query := database.DB.Where("id = ?", id)
+	if !IsSuperAdmin(c) {
+		query = query.Where("tenant_id = ?", tenantID)
+	}
+
+	if err := query.First(&account).Error; err != nil {
+		Fail(c, http.StatusNotFound, "公众号不存在或无权操作")
 		return
 	}
 
@@ -170,30 +168,41 @@ func (h *AccountHandler) Update(c *gin.Context) {
 	Ok(c, account)
 }
 
-// Delete 删除公众号
-// @Summary 删除指定公众号
-// @Tags 公众号管理
-// @Security BearerAuth
-// @Produce json
-// @Router /api/accounts/{id} [delete]
+// Delete 删除公众号 (防越权校验)
 func (h *AccountHandler) Delete(c *gin.Context) {
+	tenantID := GetTenantID(c)
 	id := c.Param("id")
-	if err := database.DB.Delete(&model.WxAccount{}, id).Error; err != nil {
-		Fail(c, http.StatusInternalServerError, err.Error())
+
+	query := database.DB.Where("id = ?", id)
+	if !IsSuperAdmin(c) {
+		query = query.Where("tenant_id = ?", tenantID)
+	}
+
+	res := query.Delete(&model.WxAccount{})
+	if res.RowsAffected == 0 {
+		Fail(c, http.StatusNotFound, "公众号不存在或无权操作")
 		return
 	}
+
 	Ok(c, gin.H{"id": id, "deleted": true})
 }
 
-// SetDefault 设为默认公众号
-// @Summary 设为默认公众号
-// @Tags 公众号管理
-// @Security BearerAuth
-// @Produce json
-// @Router /api/accounts/{id}/set-default [post]
+// SetDefault 设为默认公众号 (防越权)
 func (h *AccountHandler) SetDefault(c *gin.Context) {
+	tenantID := GetTenantID(c)
 	id := c.Param("id")
-	database.DB.Model(&model.WxAccount{}).Where("1 = 1").Update("is_default", false)
-	database.DB.Model(&model.WxAccount{}).Where("id = ?", id).Update("is_default", true)
+
+	var account model.WxAccount
+	query := database.DB.Where("id = ?", id)
+	if !IsSuperAdmin(c) {
+		query = query.Where("tenant_id = ?", tenantID)
+	}
+	if err := query.First(&account).Error; err != nil {
+		Fail(c, http.StatusNotFound, "公众号不存在或无权操作")
+		return
+	}
+
+	database.DB.Model(&model.WxAccount{}).Where("tenant_id = ?", tenantID).Update("is_default", false)
+	database.DB.Model(&model.WxAccount{}).Where("id = ? AND tenant_id = ?", id, tenantID).Update("is_default", true)
 	Ok(c, gin.H{"status": "default_updated"})
 }

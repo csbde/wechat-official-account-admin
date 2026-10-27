@@ -17,18 +17,14 @@ import (
 
 type MaterialHandler struct{}
 
-// List 获取素材列表
-// @Summary 获取多媒体素材列表
-// @Tags 素材管理
-// @Security BearerAuth
-// @Produce json
-// @Router /api/materials [get]
+// List 获取素材列表 (租户隔离)
 func (h *MaterialHandler) List(c *gin.Context) {
 	appid := GetAppID(c)
-	mediaType := c.Query("type") // image, voice, video, news
+	tenantID := GetTenantID(c)
+	mediaType := c.Query("type")
 	page, pageSize := GetPaginationParams(c)
 
-	query := database.DB.Model(&model.WxMaterial{}).Where("app_id = ?", appid)
+	query := database.DB.Model(&model.WxMaterial{}).Where("app_id = ? AND tenant_id = ?", appid, tenantID)
 	if mediaType != "" {
 		query = query.Where("media_type = ?", mediaType)
 	}
@@ -42,15 +38,11 @@ func (h *MaterialHandler) List(c *gin.Context) {
 	Page(c, list, total, page, pageSize)
 }
 
-// Upload 上传素材
-// @Summary 上传多媒体素材文件
-// @Tags 素材管理
-// @Security BearerAuth
-// @Accept multipart/form-data
-// @Produce json
-// @Router /api/materials/upload [post]
+// Upload 上传素材 (绑定租户)
 func (h *MaterialHandler) Upload(c *gin.Context) {
 	appid := GetAppID(c)
+	tenantID := GetTenantID(c)
+
 	file, err := c.FormFile("file")
 	if err != nil {
 		Fail(c, http.StatusBadRequest, "请选择上传文件")
@@ -60,7 +52,7 @@ func (h *MaterialHandler) Upload(c *gin.Context) {
 	mediaType := c.DefaultPostForm("media_type", "image")
 	title := c.DefaultPostForm("title", file.Filename)
 
-	saveDir := filepath.Join("files", "upload-image", appid)
+	saveDir := filepath.Join("files", "upload-image", fmt.Sprintf("tenant_%d", tenantID), appid)
 	_ = os.MkdirAll(saveDir, 0755)
 
 	ext := filepath.Ext(file.Filename)
@@ -72,10 +64,11 @@ func (h *MaterialHandler) Upload(c *gin.Context) {
 		return
 	}
 
-	webUrl := fmt.Sprintf("/files/upload-image/%s/%s", appid, uniqueFilename)
+	webUrl := fmt.Sprintf("/files/upload-image/tenant_%d/%s/%s", tenantID, appid, uniqueFilename)
 	mediaID := fmt.Sprintf("mock_media_%d", time.Now().UnixNano())
 
 	material := model.WxMaterial{
+		TenantID:      tenantID,
 		AppID:         appid,
 		MediaID:       mediaID,
 		MediaType:     mediaType,
@@ -90,19 +83,15 @@ func (h *MaterialHandler) Upload(c *gin.Context) {
 	Ok(c, material)
 }
 
-// Delete 删除素材
-// @Summary 删除指定素材
-// @Tags 素材管理
-// @Security BearerAuth
-// @Produce json
-// @Router /api/materials/{id} [delete]
+// Delete 删除素材 (防越权校验)
 func (h *MaterialHandler) Delete(c *gin.Context) {
 	appid := GetAppID(c)
+	tenantID := GetTenantID(c)
 	id := c.Param("id")
 
 	var material model.WxMaterial
-	if err := database.DB.Where("app_id = ? AND id = ?", appid, id).First(&material).Error; err != nil {
-		Fail(c, http.StatusNotFound, "素材不存在")
+	if err := database.DB.Where("id = ? AND app_id = ? AND tenant_id = ?", id, appid, tenantID).First(&material).Error; err != nil {
+		Fail(c, http.StatusNotFound, "素材不存在或无权操作")
 		return
 	}
 
@@ -114,17 +103,14 @@ func (h *MaterialHandler) Delete(c *gin.Context) {
 	Ok(c, gin.H{"id": id, "deleted": true})
 }
 
-// Preview 素材预览或下载直链
-// @Summary 预览素材图片或媒体
-// @Tags 素材管理
-// @Produce image/*
-// @Router /api/materials/{id}/preview [get]
+// Preview 素材预览 (租户隔离)
 func (h *MaterialHandler) Preview(c *gin.Context) {
 	appid := GetAppID(c)
+	tenantID := GetTenantID(c)
 	id := c.Param("id")
 
 	var material model.WxMaterial
-	if err := database.DB.Where("app_id = ? AND id = ?", appid, id).First(&material).Error; err != nil {
+	if err := database.DB.Where("id = ? AND app_id = ? AND tenant_id = ?", id, appid, tenantID).First(&material).Error; err != nil {
 		c.Status(http.StatusNotFound)
 		return
 	}

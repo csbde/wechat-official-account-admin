@@ -14,25 +14,21 @@ import (
 type QrcodeHandler struct{}
 
 type CreateQrcodeRequest struct {
-	QrcodeType    string `json:"qrcode_type" binding:"required"` // temp, limit
+	QrcodeType    string `json:"qrcode_type" binding:"required"`
 	SceneStr      string `json:"scene_str"`
 	SceneID       int    `json:"scene_id"`
-	ExpireSeconds int    `json:"expire_seconds"` // 针对 temp，默认 2592000
+	ExpireSeconds int    `json:"expire_seconds"`
 	Remark        string `json:"remark"`
 }
 
-// List 带参二维码列表
-// @Summary 获取带参二维码列表
-// @Tags 带参二维码
-// @Security BearerAuth
-// @Produce json
-// @Router /api/qrcode [get]
+// List 带参二维码列表 (租户隔离)
 func (h *QrcodeHandler) List(c *gin.Context) {
 	appid := GetAppID(c)
+	tenantID := GetTenantID(c)
 	page, pageSize := GetPaginationParams(c)
 
 	var total int64
-	query := database.DB.Model(&model.WxQrcode{}).Where("app_id = ?", appid)
+	query := database.DB.Model(&model.WxQrcode{}).Where("app_id = ? AND tenant_id = ?", appid, tenantID)
 	query.Count(&total)
 
 	var list []model.WxQrcode
@@ -41,15 +37,10 @@ func (h *QrcodeHandler) List(c *gin.Context) {
 	Page(c, list, total, page, pageSize)
 }
 
-// Create 生成带参二维码
-// @Summary 创建新二维码
-// @Tags 带参二维码
-// @Security BearerAuth
-// @Accept json
-// @Produce json
-// @Router /api/qrcode [post]
+// Create 生成带参二维码 (绑定租户)
 func (h *QrcodeHandler) Create(c *gin.Context) {
 	appid := GetAppID(c)
+	tenantID := GetTenantID(c)
 	var req CreateQrcodeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		Fail(c, http.StatusBadRequest, err.Error())
@@ -79,6 +70,7 @@ func (h *QrcodeHandler) Create(c *gin.Context) {
 	}
 
 	item := model.WxQrcode{
+		TenantID:      tenantID,
 		AppID:         appid,
 		QrcodeType:    req.QrcodeType,
 		SceneID:       req.SceneID,

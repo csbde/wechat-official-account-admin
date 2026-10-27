@@ -14,19 +14,16 @@ import (
 type MenuHandler struct{}
 
 type SaveMenuRequest struct {
-	MenuData string `json:"menu_data" binding:"required"` // JSON 字符串: {"button": [...]}
+	MenuData string `json:"menu_data" binding:"required"`
 }
 
-// Get 获取当前普通自定义菜单
-// @Summary 获取当前默认菜单
-// @Tags 自定义菜单
-// @Security BearerAuth
-// @Produce json
-// @Router /api/menu [get]
+// Get 获取当前普通自定义菜单 (租户隔离)
 func (h *MenuHandler) Get(c *gin.Context) {
 	appid := GetAppID(c)
+	tenantID := GetTenantID(c)
+
 	var menu model.WxMenu
-	err := database.DB.Where("app_id = ? AND menu_type = 'normal'", appid).First(&menu).Error
+	err := database.DB.Where("app_id = ? AND tenant_id = ? AND menu_type = 'normal'", appid, tenantID).First(&menu).Error
 	if err != nil {
 		Ok(c, gin.H{"menu_data": `{"button":[]}`, "published": false})
 		return
@@ -34,15 +31,11 @@ func (h *MenuHandler) Get(c *gin.Context) {
 	Ok(c, menu)
 }
 
-// Save 保存草稿
-// @Summary 保存菜单草稿
-// @Tags 自定义菜单
-// @Security BearerAuth
-// @Accept json
-// @Produce json
-// @Router /api/menu [post]
+// Save 保存草稿 (租户隔离)
 func (h *MenuHandler) Save(c *gin.Context) {
 	appid := GetAppID(c)
+	tenantID := GetTenantID(c)
+
 	var req SaveMenuRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		Fail(c, http.StatusBadRequest, err.Error())
@@ -50,9 +43,10 @@ func (h *MenuHandler) Save(c *gin.Context) {
 	}
 
 	var menu model.WxMenu
-	err := database.DB.Where("app_id = ? AND menu_type = 'normal'", appid).First(&menu).Error
+	err := database.DB.Where("app_id = ? AND tenant_id = ? AND menu_type = 'normal'", appid, tenantID).First(&menu).Error
 	if err != nil {
 		menu = model.WxMenu{
+			TenantID: tenantID,
 			AppID:    appid,
 			MenuType: "normal",
 			Name:     "默认菜单",
@@ -67,16 +61,13 @@ func (h *MenuHandler) Save(c *gin.Context) {
 	Ok(c, menu)
 }
 
-// Publish 发布到微信服务器
-// @Summary 发布菜单至微信服务器
-// @Tags 自定义菜单
-// @Security BearerAuth
-// @Produce json
-// @Router /api/menu/publish [post]
+// Publish 发布到微信服务器 (租户隔离)
 func (h *MenuHandler) Publish(c *gin.Context) {
 	appid := GetAppID(c)
+	tenantID := GetTenantID(c)
+
 	var menu model.WxMenu
-	if err := database.DB.Where("app_id = ? AND menu_type = 'normal'", appid).First(&menu).Error; err != nil {
+	if err := database.DB.Where("app_id = ? AND tenant_id = ? AND menu_type = 'normal'", appid, tenantID).First(&menu).Error; err != nil {
 		Fail(c, http.StatusBadRequest, "尚未配置菜单内容")
 		return
 	}
@@ -106,14 +97,11 @@ func (h *MenuHandler) Publish(c *gin.Context) {
 	Ok(c, gin.H{"status": "published", "published_at": now})
 }
 
-// SyncFromWx 从微信服务器同步菜单
-// @Summary 从微信拉取线上菜单
-// @Tags 自定义菜单
-// @Security BearerAuth
-// @Produce json
-// @Router /api/menu/sync [post]
+// SyncFromWx 从微信服务器同步菜单 (租户隔离)
 func (h *MenuHandler) SyncFromWx(c *gin.Context) {
 	appid := GetAppID(c)
+	tenantID := GetTenantID(c)
+
 	wxClient, err := service.NewWxClient(appid)
 	if err != nil {
 		Fail(c, http.StatusBadRequest, err.Error())
@@ -134,10 +122,11 @@ func (h *MenuHandler) SyncFromWx(c *gin.Context) {
 
 	bytes, _ := json.Marshal(menuObj)
 	var menu model.WxMenu
-	err = database.DB.Where("app_id = ? AND menu_type = 'normal'", appid).First(&menu).Error
+	err = database.DB.Where("app_id = ? AND tenant_id = ? AND menu_type = 'normal'", appid, tenantID).First(&menu).Error
 	now := time.Now()
 	if err != nil {
 		menu = model.WxMenu{
+			TenantID:    tenantID,
 			AppID:       appid,
 			MenuType:    "normal",
 			Name:        "同步菜单",
@@ -156,44 +145,34 @@ func (h *MenuHandler) SyncFromWx(c *gin.Context) {
 	Ok(c, menu)
 }
 
-// Delete 删除菜单
-// @Summary 删除自定义菜单
-// @Tags 自定义菜单
-// @Security BearerAuth
-// @Produce json
-// @Router /api/menu [delete]
+// Delete 删除菜单 (租户隔离)
 func (h *MenuHandler) Delete(c *gin.Context) {
 	appid := GetAppID(c)
+	tenantID := GetTenantID(c)
+
 	wxClient, err := service.NewWxClient(appid)
 	if err == nil {
 		_ = wxClient.DeleteWxMenu(c.Request.Context())
 	}
-	database.DB.Where("app_id = ? AND menu_type = 'normal'", appid).Delete(&model.WxMenu{})
+	database.DB.Where("app_id = ? AND tenant_id = ? AND menu_type = 'normal'", appid, tenantID).Delete(&model.WxMenu{})
 	Ok(c, gin.H{"deleted": true})
 }
 
-// GetConditionals 获取个性化菜单列表
-// @Summary 获取个性化菜单列表
-// @Tags 自定义菜单
-// @Security BearerAuth
-// @Produce json
-// @Router /api/menu/conditional [get]
+// GetConditionals 获取个性化菜单列表 (租户隔离)
 func (h *MenuHandler) GetConditionals(c *gin.Context) {
 	appid := GetAppID(c)
+	tenantID := GetTenantID(c)
+
 	var list []model.WxMenu
-	database.DB.Where("app_id = ? AND menu_type = 'conditional'", appid).Find(&list)
+	database.DB.Where("app_id = ? AND tenant_id = ? AND menu_type = 'conditional'", appid, tenantID).Find(&list)
 	Ok(c, list)
 }
 
-// SaveConditional 保存并发布个性化菜单
-// @Summary 保存并发布个性化菜单
-// @Tags 自定义菜单
-// @Security BearerAuth
-// @Accept json
-// @Produce json
-// @Router /api/menu/conditional [post]
+// SaveConditional 保存并发布个性化菜单 (租户隔离)
 func (h *MenuHandler) SaveConditional(c *gin.Context) {
 	appid := GetAppID(c)
+	tenantID := GetTenantID(c)
+
 	var req struct {
 		Name      string `json:"name" binding:"required"`
 		MenuData  string `json:"menu_data" binding:"required"`
@@ -217,7 +196,7 @@ func (h *MenuHandler) SaveConditional(c *gin.Context) {
 	_ = json.Unmarshal([]byte(req.MatchRule), &matchRule)
 
 	payload = map[string]interface{}{
-		"button":     buttons["button"],
+		"button":    buttons["button"],
 		"matchrule": matchRule,
 	}
 
@@ -229,6 +208,7 @@ func (h *MenuHandler) SaveConditional(c *gin.Context) {
 
 	now := time.Now()
 	menu := model.WxMenu{
+		TenantID:    tenantID,
 		AppID:       appid,
 		MenuType:    "conditional",
 		MenuID:      menuid,
@@ -243,18 +223,15 @@ func (h *MenuHandler) SaveConditional(c *gin.Context) {
 	Ok(c, menu)
 }
 
-// DeleteConditional 删除个性化菜单
-// @Summary 删除指定个性化菜单
-// @Tags 自定义菜单
-// @Security BearerAuth
-// @Produce json
-// @Router /api/menu/conditional/{id} [delete]
+// DeleteConditional 删除个性化菜单 (租户隔离防越权)
 func (h *MenuHandler) DeleteConditional(c *gin.Context) {
 	appid := GetAppID(c)
+	tenantID := GetTenantID(c)
 	id := c.Param("id")
+
 	var menu model.WxMenu
-	if err := database.DB.Where("app_id = ? AND id = ?", appid, id).First(&menu).Error; err != nil {
-		Fail(c, http.StatusNotFound, "菜单不存在")
+	if err := database.DB.Where("id = ? AND app_id = ? AND tenant_id = ?", id, appid, tenantID).First(&menu).Error; err != nil {
+		Fail(c, http.StatusNotFound, "菜单不存在或无权操作")
 		return
 	}
 

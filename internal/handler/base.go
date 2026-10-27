@@ -73,3 +73,21 @@ func GetAppID(c *gin.Context) string {
 	}
 	return ""
 }
+
+// GetTenantID 获取当前用户的多租户 ID
+func GetTenantID(c *gin.Context) uint {
+	val, exists := c.Get("tenant_id")
+	if !exists {
+		return 1
+	}
+	if tid, ok := val.(uint); ok && tid > 0 {
+		return tid
+	}
+	return 1
+}
+
+// IsSuperAdmin 判断是否超级管理员
+func IsSuperAdmin(c *gin.Context) bool {
+	role, exists := c.Get("role")
+	return exists && role == "superadmin"
+}

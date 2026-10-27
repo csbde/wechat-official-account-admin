@@ -26,7 +26,7 @@ g = _, _
 e = some(where (p.eft == allow))
 
 [matchers]
-m = g(r.sub, p.sub) && keyMatch2(r.obj, p.obj) && regexMatch(r.act, p.act)
+m = g(r.sub, p.sub) && (keyMatch2(r.obj, p.obj) || regexMatch(r.obj, p.obj)) && regexMatch(r.act, p.act)
 `
 
 func InitCasbin(db *gorm.DB) (*casbin.Enforcer, error) {
@@ -57,17 +57,17 @@ func InitCasbin(db *gorm.DB) (*casbin.Enforcer, error) {
 }
 
 func initDefaultPolicies(e *casbin.Enforcer) {
-	// admin 拥有全权限
 	rules := [][]string{
-		{"admin", "/api/*", ".*"},
-		{"operator", "/api/accounts/*", "GET|POST|PUT"},
-		{"operator", "/api/menu/*", ".*"},
-		{"operator", "/api/materials/*", ".*"},
-		{"operator", "/api/autoreply/*", ".*"},
-		{"operator", "/api/fans/*", ".*"},
-		{"operator", "/api/qrcode/*", ".*"},
-		{"operator", "/api/system/user/userinfo", "GET"},
-		{"operator", "/api/system/common/*", "GET"},
+		{"superadmin", "/api/.*", ".*"},
+		{"admin", "/api/.*", ".*"},
+		{"operator", "/api/accounts.*", "GET|POST|PUT"},
+		{"operator", "/api/menu.*", ".*"},
+		{"operator", "/api/materials.*", ".*"},
+		{"operator", "/api/autoreply.*", ".*"},
+		{"operator", "/api/fans.*", ".*"},
+		{"operator", "/api/qrcode.*", ".*"},
+		{"operator", "/api/auth/userinfo", "GET"},
+		{"operator", "/api/system/public-ip", "GET"},
 	}
 
 	for _, rule := range rules {
@@ -75,5 +75,4 @@ func initDefaultPolicies(e *casbin.Enforcer) {
 			_, _ = e.AddPolicy(rule[0], rule[1], rule[2])
 		}
 	}
-	_ = e.SavePolicy()
 }

@@ -17,26 +17,23 @@ import (
 
 type SystemHandler struct{}
 
-// UserList 用户列表
-// @Summary 获取后台用户列表
-// @Tags 系统管理
-// @Security BearerAuth
-// @Produce json
-// @Router /api/system/users [get]
+// UserList 用户列表 (租户隔离防越权)
 func (h *SystemHandler) UserList(c *gin.Context) {
+	tenantID := GetTenantID(c)
 	var users []model.User
-	database.DB.Order("id asc").Find(&users)
+
+	query := database.DB.Model(&model.User{})
+	if !IsSuperAdmin(c) {
+		query = query.Where("tenant_id = ?", tenantID)
+	}
+
+	query.Order("id asc").Find(&users)
 	Ok(c, users)
 }
 
-// CreateUser 创建系统用户
-// @Summary 添加后台用户
-// @Tags 系统管理
-// @Security BearerAuth
-// @Accept json
-// @Produce json
-// @Router /api/system/users [post]
+// CreateUser 创建系统用户 (强制绑定当前租户)
 func (h *SystemHandler) CreateUser(c *gin.Context) {
+	tenantID := GetTenantID(c)
 	var req struct {
 		Username string `json:"username" binding:"required"`
 		Password string `json:"password" binding:"required"`
@@ -57,11 +54,12 @@ func (h *SystemHandler) CreateUser(c *gin.Context) {
 
 	hash, _ := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	role := req.Role
-	if role == "" {
+	if role == "" || role == "superadmin" {
 		role = "operator"
 	}
 
 	user := model.User{
+		TenantID: tenantID, // 严格隔离归属当前租户
 		Username: req.Username,
 		Password: string(hash),
 		Nickname: req.Nickname,
@@ -72,18 +70,19 @@ func (h *SystemHandler) CreateUser(c *gin.Context) {
 	Ok(c, user)
 }
 
-// UpdateUser 更新用户
-// @Summary 修改用户信息或重置密码
-// @Tags 系统管理
-// @Security BearerAuth
-// @Accept json
-// @Produce json
-// @Router /api/system/users/{id} [put]
+// UpdateUser 更新用户 (防越权校验)
 func (h *SystemHandler) UpdateUser(c *gin.Context) {
+	tenantID := GetTenantID(c)
 	id := c.Param("id")
+
 	var user model.User
-	if err := database.DB.First(&user, id).Error; err != nil {
-		Fail(c, http.StatusNotFound, "用户不存在")
+	query := database.DB.Where("id = ?", id)
+	if !IsSuperAdmin(c) {
+		query = query.Where("tenant_id = ?", tenantID)
+	}
+
+	if err := query.First(&user).Error; err != nil {
+		Fail(c, http.StatusNotFound, "用户不存在或无权操作")
 		return
 	}
 
@@ -101,7 +100,7 @@ func (h *SystemHandler) UpdateUser(c *gin.Context) {
 	if req.Nickname != "" {
 		user.Nickname = req.Nickname
 	}
-	if req.Role != "" {
+	if req.Role != "" && req.Role != "superadmin" {
 		user.Role = req.Role
 	}
 	if req.Status != nil {
@@ -116,27 +115,30 @@ func (h *SystemHandler) UpdateUser(c *gin.Context) {
 	Ok(c, user)
 }
 
-// DeleteUser 删除用户
-// @Summary 删除指定用户
-// @Tags 系统管理
-// @Security BearerAuth
-// @Produce json
-// @Router /api/system/users/{id} [delete]
+// DeleteUser 删除用户 (防越权校验)
 func (h *SystemHandler) DeleteUser(c *gin.Context) {
+	tenantID := GetTenantID(c)
 	id := c.Param("id")
+
 	if id == "1" {
-		Fail(c, http.StatusBadRequest, "不能删除超级管理员账号")
+		Fail(c, http.StatusBadRequest, "不能删除初始超级管理员")
 		return
 	}
-	database.DB.Delete(&model.User{}, id)
+
+	query := database.DB.Where("id = ?", id)
+	if !IsSuperAdmin(c) {
+		query = query.Where("tenant_id = ?", tenantID)
+	}
+
+	res := query.Delete(&model.User{})
+	if res.RowsAffected == 0 {
+		Fail(c, http.StatusNotFound, "用户不存在或无权操作")
+		return
+	}
 	Ok(c, gin.H{"id": id, "deleted": true})
 }
 
 // PublicIP 获取服务器公网出口 IP
-// @Summary 查询服务器公网 IP
-// @Tags 系统管理
-// @Produce json
-// @Router /api/system/public-ip [get]
 func (h *SystemHandler) PublicIP(c *gin.Context) {
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get("https://api.ipify.org")
@@ -150,11 +152,12 @@ func (h *SystemHandler) PublicIP(c *gin.Context) {
 }
 
 // HealthCheck 健康探测
-// @Summary 服务各组件健康状态
-// @Tags 系统管理
-// @Produce json
-// @Router /api/system/health [get]
 func (h *SystemHandler) HealthCheck(c *gin.Context) {
+	dbType := "sqlite"
+	if database.DB != nil {
+		dbType = database.DB.Dialector.Name()
+	}
+
 	dbStatus := "up"
 	if database.DB != nil {
 		sqlDB, err := database.DB.DB()
@@ -182,11 +185,12 @@ func (h *SystemHandler) HealthCheck(c *gin.Context) {
 	}
 
 	Ok(c, gin.H{
-		"status":      "ok",
-		"database":    dbStatus,
-		"redis":       redisStatus,
-		"asynq":       asynqStatus,
-		"telemetry":   "active",
-		"server_time": time.Now().Format(time.RFC3339),
+		"status":        "ok",
+		"database":      dbStatus,
+		"database_type": dbType,
+		"redis":         redisStatus,
+		"asynq":         asynqStatus,
+		"telemetry":     "active",
+		"server_time":   time.Now().Format(time.RFC3339),
 	})
 }

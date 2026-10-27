@@ -14,19 +14,15 @@ import (
 
 type FanHandler struct{}
 
-// List 粉丝列表
-// @Summary 粉丝用户分页查询
-// @Tags 粉丝与标签
-// @Security BearerAuth
-// @Produce json
-// @Router /api/fans [get]
+// List 粉丝列表 (租户隔离)
 func (h *FanHandler) List(c *gin.Context) {
 	appid := GetAppID(c)
+	tenantID := GetTenantID(c)
 	keyword := c.Query("keyword")
 	tagId := c.Query("tag_id")
 	page, pageSize := GetPaginationParams(c)
 
-	query := database.DB.Model(&model.WxFan{}).Where("app_id = ?", appid)
+	query := database.DB.Model(&model.WxFan{}).Where("app_id = ? AND tenant_id = ?", appid, tenantID)
 
 	if keyword != "" {
 		like := "%" + keyword + "%"
@@ -46,12 +42,7 @@ func (h *FanHandler) List(c *gin.Context) {
 	Page(c, list, total, page, pageSize)
 }
 
-// Sync 触发后台粉丝同步
-// @Summary 异步同步微信粉丝
-// @Tags 粉丝与标签
-// @Security BearerAuth
-// @Produce json
-// @Router /api/fans/sync [post]
+// Sync 异步同步微信粉丝
 func (h *FanHandler) Sync(c *gin.Context) {
 	appid := GetAppID(c)
 	if err := queue.EnqueueSyncFans(appid); err != nil {
@@ -61,15 +52,10 @@ func (h *FanHandler) Sync(c *gin.Context) {
 	Ok(c, gin.H{"status": "queued", "message": "微信粉丝同步任务已派发至后台队列"})
 }
 
-// UpdateRemark 修改粉丝备注
-// @Summary 更新粉丝备注名
-// @Tags 粉丝与标签
-// @Security BearerAuth
-// @Accept json
-// @Produce json
-// @Router /api/fans/remark [post]
+// UpdateRemark 修改粉丝备注 (租户隔离)
 func (h *FanHandler) UpdateRemark(c *gin.Context) {
 	appid := GetAppID(c)
+	tenantID := GetTenantID(c)
 	var req struct {
 		OpenID string `json:"openid" binding:"required"`
 		Remark string `json:"remark"`
@@ -84,35 +70,31 @@ func (h *FanHandler) UpdateRemark(c *gin.Context) {
 		_ = wxClient.UpdateUserRemark(c.Request.Context(), req.OpenID, req.Remark)
 	}
 
-	database.DB.Model(&model.WxFan{}).
-		Where("app_id = ? AND open_id = ?", appid, req.OpenID).
+	res := database.DB.Model(&model.WxFan{}).
+		Where("app_id = ? AND open_id = ? AND tenant_id = ?", appid, req.OpenID, tenantID).
 		Update("remark", req.Remark)
+
+	if res.RowsAffected == 0 {
+		Fail(c, http.StatusNotFound, "粉丝不存在或无权操作")
+		return
+	}
 
 	Ok(c, gin.H{"status": "updated"})
 }
 
-// GetTags 获取标签列表
-// @Summary 获取微信标签列表
-// @Tags 粉丝与标签
-// @Security BearerAuth
-// @Produce json
-// @Router /api/fans/tags [get]
+// GetTags 获取标签列表 (租户隔离)
 func (h *FanHandler) GetTags(c *gin.Context) {
 	appid := GetAppID(c)
+	tenantID := GetTenantID(c)
 	var list []model.WxTag
-	database.DB.Where("app_id = ?", appid).Order("id asc").Find(&list)
+	database.DB.Where("app_id = ? AND tenant_id = ?", appid, tenantID).Order("id asc").Find(&list)
 	Ok(c, list)
 }
 
-// CreateTag 新建粉丝标签
-// @Summary 创建新标签
-// @Tags 粉丝与标签
-// @Security BearerAuth
-// @Accept json
-// @Produce json
-// @Router /api/fans/tags [post]
+// CreateTag 新建粉丝标签 (绑定租户)
 func (h *FanHandler) CreateTag(c *gin.Context) {
 	appid := GetAppID(c)
+	tenantID := GetTenantID(c)
 	var req struct {
 		Name string `json:"name" binding:"required"`
 	}
@@ -123,47 +105,44 @@ func (h *FanHandler) CreateTag(c *gin.Context) {
 
 	var maxTag model.WxTag
 	tagID := 100
-	if err := database.DB.Where("app_id = ?", appid).Order("tag_id desc").First(&maxTag).Error; err == nil {
+	if err := database.DB.Where("app_id = ? AND tenant_id = ?", appid, tenantID).Order("tag_id desc").First(&maxTag).Error; err == nil {
 		tagID = maxTag.TagID + 1
 	}
 
 	tag := model.WxTag{
-		AppID: appid,
-		TagID: tagID,
-		Name:  req.Name,
-		Count: 0,
+		TenantID: tenantID,
+		AppID:    appid,
+		TagID:    tagID,
+		Name:     req.Name,
+		Count:    0,
 	}
 	database.DB.Create(&tag)
 
 	Ok(c, tag)
 }
 
-// DeleteTag 删除粉丝标签
-// @Summary 删除指定标签
-// @Tags 粉丝与标签
-// @Security BearerAuth
-// @Produce json
-// @Router /api/fans/tags/{id} [delete]
+// DeleteTag 删除粉丝标签 (防越权校验)
 func (h *FanHandler) DeleteTag(c *gin.Context) {
 	appid := GetAppID(c)
+	tenantID := GetTenantID(c)
 	id := c.Param("id")
-	database.DB.Where("app_id = ? AND id = ?", appid, id).Delete(&model.WxTag{})
+
+	res := database.DB.Where("id = ? AND app_id = ? AND tenant_id = ?", id, appid, tenantID).Delete(&model.WxTag{})
+	if res.RowsAffected == 0 {
+		Fail(c, http.StatusNotFound, "标签不存在或无权操作")
+		return
+	}
 	Ok(c, gin.H{"id": id, "deleted": true})
 }
 
-// BatchTagging 批量给粉丝打/取消标签
-// @Summary 批量更新粉丝标签
-// @Tags 粉丝与标签
-// @Security BearerAuth
-// @Accept json
-// @Produce json
-// @Router /api/fans/tags/batch [post]
+// BatchTagging 批量给粉丝打/取消标签 (租户隔离)
 func (h *FanHandler) BatchTagging(c *gin.Context) {
 	appid := GetAppID(c)
+	tenantID := GetTenantID(c)
 	var req struct {
 		OpenIDs []string `json:"openids" binding:"required"`
 		TagID   int      `json:"tag_id" binding:"required"`
-		Action  string   `json:"action" binding:"required"` // add | remove
+		Action  string   `json:"action" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		Fail(c, http.StatusBadRequest, err.Error())
@@ -172,7 +151,7 @@ func (h *FanHandler) BatchTagging(c *gin.Context) {
 
 	for _, openid := range req.OpenIDs {
 		var fan model.WxFan
-		if err := database.DB.Where("app_id = ? AND open_id = ?", appid, openid).First(&fan).Error; err == nil {
+		if err := database.DB.Where("app_id = ? AND open_id = ? AND tenant_id = ?", appid, openid, tenantID).First(&fan).Error; err == nil {
 			var tags []int
 			_ = json.Unmarshal([]byte(fan.TagIDs), &tags)
 			newTags := make([]int, 0)
@@ -196,11 +175,10 @@ func (h *FanHandler) BatchTagging(c *gin.Context) {
 		}
 	}
 
-	// 重新计算标签人数
 	var count int64
 	tagStr := strconv.Itoa(req.TagID)
-	database.DB.Model(&model.WxFan{}).Where("app_id = ? AND tag_ids LIKE ?", appid, "%"+tagStr+"%").Count(&count)
-	database.DB.Model(&model.WxTag{}).Where("app_id = ? AND tag_id = ?", appid, req.TagID).Update("count", count)
+	database.DB.Model(&model.WxFan{}).Where("app_id = ? AND tenant_id = ? AND tag_ids LIKE ?", appid, tenantID, "%"+tagStr+"%").Count(&count)
+	database.DB.Model(&model.WxTag{}).Where("app_id = ? AND tenant_id = ? AND tag_id = ?", appid, tenantID, req.TagID).Update("count", count)
 
 	Ok(c, gin.H{"status": "batch_completed", "count": count})
 }

@@ -10,19 +10,21 @@ import (
 
 type LogHandler struct{}
 
-// List 请求与追踪日志分页
-// @Summary 获取 API 审计日志与链路追踪
-// @Tags 系统与日志
-// @Security BearerAuth
-// @Produce json
-// @Router /api/logs [get]
+// List 请求与追踪日志分页 (多租户隔离防越权)
 func (h *LogHandler) List(c *gin.Context) {
+	tenantID := GetTenantID(c)
 	page, pageSize := GetPaginationParams(c)
 	keyword := c.Query("keyword")
 	statusStr := c.Query("status")
 	appid := c.Query("appid")
 
 	query := database.DB.Model(&model.RequestLog{})
+
+	// 非超级管理员只能查看本租户日志
+	if !IsSuperAdmin(c) {
+		query = query.Where("tenant_id = ?", tenantID)
+	}
+
 	if appid != "" {
 		query = query.Where("appid = ?", appid)
 	}

@@ -23,8 +23,8 @@ import (
 	"github.com/anchel/wechat-official-account-admin/internal/validator"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
-	"gorm.io/gorm"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 //go:embed all:wechat-official-account-admin-fe/dist
@@ -35,7 +35,7 @@ var configFile string
 var rootCmd = &cobra.Command{
 	Use:   "woaa",
 	Short: "WeChat Official Account Admin",
-	Long:  "Modern WeChat Official Account Management Platform built with Go, Gin, GORM, PostgreSQL, Redis, Asynq, Casbin and OpenTelemetry",
+	Long:  "Modern WeChat Official Account Management Platform built with Go 1.26+, SQLite/PostgreSQL, Multi-tenancy Data Isolation and React",
 	Run: func(cmd *cobra.Command, args []string) {
 		startServer()
 	},
@@ -65,7 +65,7 @@ func startServer() {
 		fmt.Printf("Failed to init logger: %v\n", err)
 		os.Exit(1)
 	}
-	logger.Info("Starting WeChat Official Account Admin Server...")
+	logger.Info("Starting WeChat Official Account Admin Server (Go 1.26+)...")
 
 	// 3. 初始化 OpenTelemetry
 	shutdownTelemetry, err := telemetry.Init(&cfg.Telemetry)
@@ -77,34 +77,38 @@ func startServer() {
 		}()
 	}
 
-	// 4. 初始化数据库 (GORM + PostgreSQL)
+	// 4. 初始化数据库 (默认 SQLite，若配置 pgsql 则用 pgsql)
 	db, err := database.Init(&cfg.Database)
 	if err != nil {
 		logger.Error("Database connection failed", zap.Error(err))
 		os.Exit(1)
 	}
 
-	// 自动迁移
+	// 自动迁移多租户数据结构
 	if err := model.AutoMigrate(db); err != nil {
 		logger.Error("Database auto migrate failed", zap.Error(err))
 		os.Exit(1)
 	}
 
-	// 初始化默认管理员用户 (admin / admin123)
-	initDefaultAdmin(db)
+	// 初始化默认主租户与管理员
+	initDefaultTenantAndAdmin(db)
 
-	// 5. 初始化 Redis 缓存
-	_, err = cache.Init(&cfg.Redis)
-	if err != nil {
-		logger.Warn("Redis connection failed (caching will be degraded)", zap.Error(err))
+	// 5. 初始化 Redis 缓存 (可选)
+	if cfg.Redis.Addr != "" {
+		_, err = cache.Init(&cfg.Redis)
+		if err != nil {
+			logger.Warn("Redis connection failed (caching degraded)", zap.Error(err))
+		}
 	}
 
-	// 6. 初始化 Asynq 队列
-	_, server, err := queue.Init(cfg)
-	if err == nil && server != nil {
-		queue.StartWorker(server, queue.NewServeMux())
+	// 6. 初始化 Asynq 队列 (依赖 Redis，若未开启则优雅跳过)
+	if cache.RDB != nil {
+		_, server, err := queue.Init(cfg)
+		if err == nil && server != nil {
+			queue.StartWorker(server, queue.NewServeMux())
+		}
 	} else {
-		logger.Warn("Asynq queue disabled", zap.Error(err))
+		logger.Info("Asynq queue disabled (Redis not configured or connected)")
 	}
 
 	// 7. 初始化 Casbin RBAC
@@ -126,7 +130,7 @@ func startServer() {
 	}
 
 	go func() {
-		logger.Info(fmt.Sprintf("Server is listening on :%d", cfg.Server.Port))
+		logger.Info(fmt.Sprintf("Server is listening on :%d (Database: %s)", cfg.Server.Port, db.Dialector.Name()))
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("Server start failed", zap.Error(err))
 			os.Exit(1)
@@ -148,19 +152,35 @@ func startServer() {
 	logger.Info("Server exited properly")
 }
 
-func initDefaultAdmin(db *gorm.DB) {
+func initDefaultTenantAndAdmin(db *gorm.DB) {
+	// 初始化默认租户
+	var tenant model.Tenant
+	if err := db.Where("id = 1").First(&tenant).Error; err != nil {
+		tenant = model.Tenant{
+			ID:          1,
+			Name:        "默认组织",
+			Code:        "default",
+			Description: "系统默认组织企业",
+			Status:      1,
+		}
+		db.Create(&tenant)
+		logger.Info("Default tenant created: ID=1 (default)")
+	}
+
+	// 初始化默认管理员用户 (admin / admin123, 属于租户1)
 	var count int64
 	db.Model(&model.User{}).Where("username = ?", "admin").Count(&count)
 	if count == 0 {
 		hash, _ := bcrypt.GenerateFromPassword([]byte("admin123"), bcrypt.DefaultCost)
 		admin := model.User{
+			TenantID: 1, // 属于默认租户
 			Username: "admin",
 			Password: string(hash),
 			Nickname: "超级管理员",
-			Role:     "admin",
+			Role:     "superadmin",
 			Status:   1,
 		}
 		db.Create(&admin)
-		logger.Info("Default administrator user created: admin / admin123")
+		logger.Info("Default superadmin user created: admin / admin123 (Tenant: 1)")
 	}
 }

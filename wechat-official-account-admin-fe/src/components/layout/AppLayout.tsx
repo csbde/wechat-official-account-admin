@@ -39,7 +39,7 @@ interface AppLayoutProps {
 }
 
 export const AppLayout: React.FC<AppLayoutProps> = ({ currentTab, onTabChange, children }) => {
-  const { user, logout } = useAuthStore()
+  const { user, tenant, logout } = useAuthStore()
   const { currentApp, setCurrentApp, theme, toggleTheme } = useAppStore()
 
   // 获取所有公众号列表
@@ -203,7 +203,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentTab, onTabChange, c
                   </div>
                   <div className="text-left hidden sm:block">
                     <div className="text-xs font-medium leading-none">{user?.nickname || user?.username}</div>
-                    <div className="text-[10px] text-muted-foreground capitalize leading-tight mt-0.5">{user?.role}</div>
+                    <div className="text-[10px] text-muted-foreground capitalize leading-tight mt-0.5">{user?.role} · {tenant?.name || "默认组织"}</div>
                   </div>
                   <ChevronDown className="h-3 w-3 opacity-50" />
                 </Button>

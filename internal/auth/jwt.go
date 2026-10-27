@@ -10,18 +10,20 @@ import (
 
 type Claims struct {
 	UserID      uint   `json:"user_id"`
+	TenantID    uint   `json:"tenant_id"`
 	Username    string `json:"username"`
 	Role        string `json:"role"`
 	SSOProvider string `json:"sso_provider,omitempty"`
 	jwt.RegisteredClaims
 }
 
-func GenerateToken(userID uint, username, role, ssoProvider string) (string, error) {
+func GenerateToken(userID, tenantID uint, username, role, ssoProvider string) (string, error) {
 	cfg := config.GlobalConfig.JWT
 	expirationTime := time.Now().Add(time.Duration(cfg.ExpireHours) * time.Hour)
 
 	claims := &Claims{
 		UserID:      userID,
+		TenantID:    tenantID,
 		Username:    username,
 		Role:        role,
 		SSOProvider: ssoProvider,

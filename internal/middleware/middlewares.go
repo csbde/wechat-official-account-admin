@@ -26,7 +26,7 @@ func CORS() gin.HandlerFunc {
 			c.Header("Access-Control-Allow-Origin", "*")
 		}
 		c.Header("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE, UPDATE")
-		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, X-App-ID")
+		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, X-App-ID, X-Tenant-ID")
 		c.Header("Access-Control-Expose-Headers", "Content-Length, Access-Control-Allow-Origin, Access-Control-Allow-Headers, Cache-Control, Content-Language, Content-Type")
 		c.Header("Access-Control-Allow-Credentials", "true")
 
@@ -48,7 +48,7 @@ func (r responseBodyWriter) Write(b []byte) (int, error) {
 	return r.ResponseWriter.Write(b)
 }
 
-// RequestAudit 审计中间件：记录请求并写入 RequestLog，支持 OpenTelemetry TraceID 关联
+// RequestAudit 审计中间件：记录多租户请求
 func RequestAudit() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
@@ -69,7 +69,6 @@ func RequestAudit() gin.HandlerFunc {
 
 		latency := time.Since(start).Milliseconds()
 
-		// 获取 trace ID
 		span := trace.SpanFromContext(c.Request.Context())
 		traceID := ""
 		if span.SpanContext().IsValid() {
@@ -79,14 +78,21 @@ func RequestAudit() gin.HandlerFunc {
 		appid, _ := c.Get("appid")
 		appidStr, _ := appid.(string)
 
+		tenantIDVal, _ := c.Get("tenant_id")
+		tenantID, _ := tenantIDVal.(uint)
+		if tenantID == 0 {
+			tenantID = 1
+		}
+
 		path := c.Request.URL.Path
-		if strings.HasPrefix(path, "/api/") && !strings.Contains(path, "/request-log") {
+		if strings.HasPrefix(path, "/api/") && !strings.Contains(path, "/logs") {
 			respBody := ""
 			if w.body.Len() < 2048 {
 				respBody = w.body.String()
 			}
 			go func() {
 				reqLog := model.RequestLog{
+					TenantID:     tenantID,
 					AppID:        appidStr,
 					TraceID:      traceID,
 					Method:       c.Request.Method,
@@ -106,7 +112,7 @@ func RequestAudit() gin.HandlerFunc {
 	}
 }
 
-// JWTAuth 鉴权中间件
+// JWTAuth 鉴权中间件 (提取用户身份与多租户归属)
 func JWTAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
@@ -131,7 +137,9 @@ func JWTAuth() gin.HandlerFunc {
 			return
 		}
 
+		// 将用户基础信息与所属租户放入上下文
 		c.Set("user_id", claims.UserID)
+		c.Set("tenant_id", claims.TenantID)
 		c.Set("username", claims.Username)
 		c.Set("role", claims.Role)
 		c.Next()
@@ -166,7 +174,8 @@ func CasbinEnforcer() gin.HandlerFunc {
 	}
 }
 
-// TenantAppID 公众号租户中间件：自动从 Header `X-App-ID` 或 Query `appid` 提取
+// TenantAppID 多租户公众号防越权中间件
+// 严格校验请求指定的公众号是否真正属于当前登录用户的租户，彻底杜绝跨租户水平越权！
 func TenantAppID(required bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		appid := c.GetHeader("X-App-ID")
@@ -174,10 +183,48 @@ func TenantAppID(required bool) gin.HandlerFunc {
 			appid = c.Query("appid")
 		}
 
-		if appid == "" && required {
-			c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "Header X-App-ID or query appid is required for this operation"})
+		if appid == "" {
+			if required {
+				c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "Header X-App-ID or query appid is required"})
+				c.Abort()
+				return
+			}
+			c.Next()
+			return
+		}
+
+		// 提取当前用户的租户 ID
+		tenantIDVal, exists := c.Get("tenant_id")
+		if !exists {
+			c.JSON(http.StatusUnauthorized, gin.H{"code": 401, "message": "No tenant context found"})
 			c.Abort()
 			return
+		}
+		tenantID := tenantIDVal.(uint)
+
+		roleVal, _ := c.Get("role")
+		role, _ := roleVal.(string)
+
+		// 超级管理员放行；非超级管理员强制核查该 AppID 是否属于该租户
+		if role != "superadmin" {
+			var count int64
+			database.DB.Model(&model.WxAccount{}).
+				Where("app_id = ? AND tenant_id = ?", appid, tenantID).
+				Count(&count)
+
+			if count == 0 {
+				logger.Warn("Cross-tenant access attempted!",
+					zap.Uint("tenant_id", tenantID),
+					zap.String("appid", appid),
+					zap.String("client_ip", c.ClientIP()),
+				)
+				c.JSON(http.StatusForbidden, gin.H{
+					"code":    403,
+					"message": "越权访问被拒绝：指定微信公众号不属于您所在的租户组织",
+				})
+				c.Abort()
+				return
+			}
 		}
 
 		c.Set("appid", appid)

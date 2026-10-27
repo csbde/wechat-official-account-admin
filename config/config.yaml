@@ -6,11 +6,17 @@ server:
   static_dir: "./files"
 
 database:
-  host: 127.0.0.1
+  # 数据库类型: sqlite (默认) 或 postgres
+  # 默认不配置 pgsql 或 host 为空时自动使用 sqlite
+  type: sqlite
+  sqlite_path: "./data/woaa.db"
+
+  # PostgreSQL 配置 (当 type: postgres 且 host 不为空时启用)
+  host: ""
   port: 5432
-  user: sc
-  password: sc
-  dbname: woaa
+  user: ""
+  password: ""
+  dbname: ""
   sslmode: disable
   max_open_conns: 50
   max_idle_conns: 10
@@ -18,7 +24,7 @@ database:
 
 redis:
   addr: 127.0.0.1:6379
-  password: sc
+  password: ""
   db: 0
 
 asynq:

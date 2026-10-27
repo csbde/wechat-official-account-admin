@@ -34,7 +34,7 @@ export const LoginPage: React.FC = () => {
       setLoading(true)
       const res: any = await api.post('/api/auth/login', values)
       if (res.token && res.user) {
-        setAuth(res.token, res.user)
+        setAuth(res.token, res.user, res.tenant)
         toast.success(`欢迎回来，${res.user.nickname || res.user.username}！`)
       }
     } catch (err: any) {
@@ -58,7 +58,7 @@ export const LoginPage: React.FC = () => {
         code: 'sso_demo_user',
       })
       if (res.token && res.user) {
-        setAuth(res.token, res.user)
+        setAuth(res.token, res.user, res.tenant)
         toast.success('SSO 单点登录验证成功！')
       }
     } catch (err) {

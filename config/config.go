@@ -24,6 +24,8 @@ type ServerConfig struct {
 }
 
 type DatabaseConfig struct {
+	Type            string `mapstructure:"type"` // sqlite (默认), postgres
+	SqlitePath      string `mapstructure:"sqlite_path"`
 	Host            string `mapstructure:"host"`
 	Port            int    `mapstructure:"port"`
 	User            string `mapstructure:"user"`
@@ -79,24 +81,26 @@ func Load(configPath string) (*Config, error) {
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
 
-	// 默认值
+	// 默认值：默认使用 SQLite，开箱即用，无需 PostgreSQL 服务
 	v.SetDefault("server.port", 9305)
 	v.SetDefault("server.mode", "debug")
 	v.SetDefault("server.allow_origins", []string{"*"})
 	v.SetDefault("server.static_dir", "./files")
 
-	v.SetDefault("database.host", "127.0.0.1")
+	v.SetDefault("database.type", "sqlite")
+	v.SetDefault("database.sqlite_path", "./data/woaa.db")
+	v.SetDefault("database.host", "")
 	v.SetDefault("database.port", 5432)
-	v.SetDefault("database.user", "sc")
-	v.SetDefault("database.password", "sc")
-	v.SetDefault("database.dbname", "woaa")
+	v.SetDefault("database.user", "")
+	v.SetDefault("database.password", "")
+	v.SetDefault("database.dbname", "")
 	v.SetDefault("database.sslmode", "disable")
 	v.SetDefault("database.max_open_conns", 50)
 	v.SetDefault("database.max_idle_conns", 10)
 	v.SetDefault("database.conn_max_lifetime", 3600)
 
 	v.SetDefault("redis.addr", "127.0.0.1:6379")
-	v.SetDefault("redis.password", "sc")
+	v.SetDefault("redis.password", "")
 	v.SetDefault("redis.db", 0)
 
 	v.SetDefault("asynq.concurrency", 5)
