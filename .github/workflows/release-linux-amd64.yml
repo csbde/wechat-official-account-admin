@@ -1,0 +1,79 @@
+name: Build & Release Linux AMD64
+
+permissions:
+  contents: write
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Linux AMD64 Binary
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.9.0
+
+      - name: Build Frontend
+        run: |
+          cd wechat-official-account-admin-fe
+          pnpm install --frozen-lockfile || pnpm install
+          pnpm build
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          check-latest: false
+
+      - name: Build Backend (Linux AMD64 with Embedded Frontend)
+        env:
+          CGO_ENABLED: 0
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          mkdir -p build/release
+          go build -trimpath -ldflags="-s -w -buildid=" -o build/release/woaa main.go
+          cp -r config build/release/
+          cp -r atlas build/release/
+          cp .env.example build/release/
+          cp README.md build/release/
+          
+          # 创建归档压缩包
+          tar -czvf build/woaa-linux-amd64.tar.gz -C build/release .
+          cp build/release/woaa build/woaa-linux-amd64
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: woaa-linux-amd64-bundle
+          path: |
+            build/woaa-linux-amd64.tar.gz
+            build/woaa-linux-amd64
+          retention-days: 7
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/woaa-linux-amd64.tar.gz
+            build/woaa-linux-amd64
+          draft: false
+          prerelease: false
+          generate_release_notes: true

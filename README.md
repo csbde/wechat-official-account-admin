@@ -1,95 +1,113 @@
-# **微信公众号管理系统**
+# 微信公众号管理平台 (WeChat Official Account Admin - WOAA Pro)
 
-## 背景
+全栈现代化重构的多微信公众号综合管理平台。
 
-微信公众号官方提供了各种 api 用来管理公众号的资源，例如素材管理、用户管理、二维码等。同时支持配置「服务器地址」用来接管公众号的消息推送。该项目可实现这些功能。
+## 🛠️ 重构后技术栈
 
-体验地址：[http://wechat.anchel.cn](http://wechat.anchel.cn/)
+### 前端技术栈
+- **核心框架**: React 18 + TypeScript + Vite
+- **UI & 样式库**: Tailwind CSS + shadcn/ui (Radix UI + Lucide-react)
+- **数据获取与缓存**: TanStack Query (React Query v5)
+- **高级数据表格**: TanStack Table (v8)
+- **状态管理**: Zustand (轻量、高效管理 Token、当前公众号租户及深浅主题)
+- **表单与校验**: React Hook Form + Zod 模式验证
+- **设计体验**: 微信绿主题系统、支持深色/浅色模式切换、高仿真微信手机端自定义菜单设计器
 
-账号密码：guest/guest
+### 后端技术栈
+- **语言与 Web 框架**: Go 1.23 + Gin (RESTful API 架构)
+- **数据库 ORM**: GORM + PostgreSQL
+- **高速缓存**: Redis (AccessToken 分布式缓存与提前续期)
+- **后台异步任务**: Asynq (分布式延迟/重试任务队列，处理粉丝批量同步、素材下载等)
+- **访问控制**: Casbin (基于 RBAC 的动态角色访问控制，策略持久化至 PostgreSQL)
+- **安全认证**: JWT Bearer Token + SSO 单点登录对接支持
+- **配置中心**: Viper (支持 YAML 文件与系统环境变量覆盖)
+- **结构化日志**: Zap (集成 Gin 请求与全局日志)
+- **数据校验**: Validator (go-playground/validator v10)
+- **接口文档**: OpenAPI 3.0 / Swagger UI (`/swagger/index.html`)
+- **数据库迁移**: Atlas (声明式 Schema 管理与版本迁移)
+- **链路观测**: OpenTelemetry (请求追踪、耗时统计与 TraceID 关联审计日志)
+- **测试框架**: Testify
 
-效果图：
-![173130945135422](https://www.anchel.cn/images/wechat/upload-6735ef232b22bae98b20cfd7.jpeg)
+---
 
-## **已实现功能**
+## 🚀 核心业务功能
 
-1. 多公众号管理
-2. 接收消息（明文、密文）
-3. 回复消息（文字、图片、音频、视频、图文（外链））
-4. 自定义菜单（含个性化菜单）
-5. 素材管理（图片、音频、视频）
-6. 二维码（永久、临时）
-7. 用户管理（标签新增、标签删除、设置用户标签、设置用户备注）
+1. **多微信公众号管理 (Accounts)**:
+   - 快速增删改查公众号凭据 (AppID, AppSecret, Token, EncodingAESKey)
+   - 顶部快捷切换当前激活的微信公众号
+   - 微信后台服务器配置 (URL 与 Token) 一键复制
+   - 设为默认公众号与启停控制
 
-### 提示
+2. **微信自定义菜单设计器 (Menu)**:
+   - 高仿真手机视图预览
+   - 一级菜单（最多3个）、二级菜单（最多5个）可视化增删与拖拽交互
+   - 动作支持：跳转网页 (`view`)、点击事件/自动回复 (`click`)、微信小程序跳转 (`miniprogram`)、扫码推事件等
+   - 个性化条件菜单（按粉丝标签、性别、操作系统匹配）
+   - 从微信线上拉取同步 & 一键发布至微信服务器
 
-微信公众号官方管理后台(mp.weixin.qq.com)的功能完整、体验良好。一般情况不建议部署自己的管理系统，毕竟功能、体验与官方管理系统相比还是有所损失。
+3. **多媒体素材库 (Materials)**:
+   - 图片、语音、视频、图文素材管理
+   - 支持本地文件上传并同步生成微信 MediaID
+   - 本地缓存直连预览与一键复制 MediaID
 
-## 技术架构
+4. **智能自动回复 (AutoReply)**:
+   - 关注公众号后欢迎语回复
+   - 收到消息默认应答
+   - 关键词回复规则（支持多关键词、精准全匹配 / 模糊半匹配）
 
-前后端分离的形式，分为两个项目
+5. **粉丝关注者与标签 (Fans & Tags)**:
+   - 基于 TanStack Table 的高级表格，支持多维搜索、分页与勾选
+   - 修改粉丝专属备注名
+   - 微信标签管理（创建、删除、重命名）
+   - 批量打标签与批量移除标签
+   - Asynq 后台异步全量同步粉丝
 
-- 后端采用 golang+mongodb+redis，即本项目
-- 前端用 vue3+element-plus，项目地址：https://github.com/anchel/wechat-official-account-admin-fe
+6. **带参二维码营销 (Qrcode)**:
+   - 临时二维码（带过期倒计时）与永久二维码生成
+   - 场景值（数字/字符串）追踪扫码渠道
+   - 实时预览与下载二维码图片
 
-前端项目以 git submodule 的形式，嵌在后端。后端在构建的时候会把前端所有资源一起打包进去，最终就只有一个可执行文件。
+7. **请求与链路追踪审计 (Logs)**:
+   - 记录每次 API 请求的 Client IP、耗时、状态码、请求体与响应体
+   - 自动关联 OpenTelemetry TraceID
 
-## 部署
+8. **系统与安全 (System)**:
+   - 管理员与操作员账号维护、密码重置
+   - 出口公网 IP 查询（用于配置微信公众号 IP 白名单）
+   - 组件健康探测 (`/api/system/health`)
 
-有两种方式，一种是采用已构建好的可执行文件，另外一种是基于源码手动构建
+---
 
-1. 采用已构建好的可执行文件
+## 🏃 快速启动
 
-   a 在 [下载地址](https://github.com/anchel/wechat-official-account-admin/releases) ，根据自己的服务器类型，下载相应的可执行文件。例如服务器是 linux，cpu 是 amd64，那么就下载 woaa-linux-amd64。为了操作方便，文件重命名为 woaa
+### 1. 运行依赖
+确保本地或 Docker 已运行 PostgreSQL (5432) 和 Redis (6379)。
+项目配置文件位于 `config/config.yaml`。
 
-   b 把可执行文件 woaa 放到服务器上某个路径，例如 /data/app
+### 2. 数据库迁移 (Atlas)
+```bash
+atlas schema apply \
+  -u "postgres://sc:sc@127.0.0.1:5432/woaa?sslmode=disable" \
+  --to "file://atlas/schema.hcl" \
+  --auto-approve
+```
 
-   c 在 /data/app 目录下，执行命令：`chmod +x woaa` 这一步是给文件加上可执行权限
+### 3. 构建并启动
+```bash
+# 构建前端
+cd wechat-official-account-admin-fe
+pnpm install
+pnpm build
+cd ..
 
-   d 把项目源码里面的 .env.example 文件重命名为 .env 并放到 /data/app 目录下，即和 woaa 同一个目录。并根据自己情况把 redis，mongodb 的信息给填上。
+# 编译后端
+go build -o woaa main.go
 
-   e 在 /data/app 目录下，执行 `./woaa` 即可启动服务
+# 运行平台
+./woaa
+```
 
-2. 基于源码手动构建
-
-   a 必备工具 git、golang(1.22 以上)、nodejs（20 以上）
-
-   b 克隆项目到本地 `git clone --recurse-submodules https://github.com/anchel/wechat-official-account-admin.git` 此时子项目也会跟着克隆
-
-   c 在项目主目录下，执行 `make fe` 来安装前端的依赖并构建前端产物
-
-   d 执行 `make all` 来构建多平台的目标，执行完成后，会在 build 目录下生成多个平台的可执行文件，根据情况选择合适的。
-
-   e 后续步骤，参考上面第一种方式
-
-## 使用
-
-服务启动之后，默认监听在 9305 端口，假设 ip 是 192.168.0.100
-
-打开浏览器输入地址：http://192.168.0.100:9305
-
-服务首次启动的时候，会自动创建超管用户 admin ，密码是：admin1987 ，可用超管用户登录进去创建其他用户，另外一定要尽快修改超管密码
-
-登录进去之后，默认是没有任何公众号的，需要先添加公众号，步骤如下：
-
-1. 去微信公众号官方后台 [官方后台](https://mp.weixin.qq.com/) 获取 AppID、AppSecret、Token、EncodingAESKey
-2. 在该系统的公众号管理页面，添加公众号
-
-   ![1731309451354](https://www.anchel.cn/images/wechat/upload-6735ba422b22bae98b20cfd5.png)
-
-3. 添加完成之后，查看详情界面可以看到配置地址，这个地址需要配置在微信公众号官方后台。
-
-   ![1731309337778](https://www.anchel.cn/images/wechat/upload-6735ba622b22bae98b20cfd6.png)
-
-   另外，微信官方会对请求来源 ip 做限制。需要把页面上显示的公网 ip，配置在微信官方的 ip 白名单里面
-
-4. 配置完成后，即可管理公众号了。
-
-## 问题排查
-
-1. 某些接口提示没有权限
-   公众号分订阅号，服务号，另外还区分是否已认证，不同类型公众号获取的接口权限列表是不一样的，详情请查看 [接口权限说明](https://developers.weixin.qq.com/doc/offiaccount/Getting_Started/Explanation_of_interface_privileges.html)
-2. 请求方的 ip 不在白名单
-   需要去微信公众号官方后台，把你服务器的外网 ip 加到白名单里面
-3. api 频率受限
-   微信对 api 的访问频率有限制，详情见 [每日调用上限](https://mp.weixin.qq.com/cgi-bin/frame?t=pages/developsetting/page/developsetting_frame)
+服务启动后，在浏览器访问 `http://localhost:9305` 即可使用。
+- 默认管理员账号：`admin`
+- 默认管理员密码：`admin123`
+- OpenAPI Swagger 接口文档地址：`http://localhost:9305/swagger/index.html`

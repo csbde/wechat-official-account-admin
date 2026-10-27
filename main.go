@@ -3,289 +3,164 @@ package main
 import (
 	"context"
 	"embed"
-	"encoding/gob"
+	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
-	"strings"
+	"os/signal"
+	"syscall"
 	"time"
 
-	_ "github.com/anchel/wechat-official-account-admin/controllers" // Import all controllers
-	"github.com/anchel/wechat-official-account-admin/lib/logger"
-	"github.com/anchel/wechat-official-account-admin/lib/types"
-	"github.com/anchel/wechat-official-account-admin/lib/utils"
-	"github.com/anchel/wechat-official-account-admin/modules/weixin"
-	"github.com/anchel/wechat-official-account-admin/mongodb"
-	"github.com/anchel/wechat-official-account-admin/routes"
-	"github.com/gin-contrib/sessions"
-	"github.com/gin-contrib/sessions/redis"
-	"github.com/gin-contrib/static"
-	ginzap "github.com/gin-contrib/zap"
-	"github.com/gin-gonic/gin"
-
-	"github.com/joho/godotenv"
-	redislib "github.com/redis/go-redis/v9"
-	"github.com/samber/lo"
+	"github.com/anchel/wechat-official-account-admin/config"
+	_ "github.com/anchel/wechat-official-account-admin/docs"
+	"github.com/anchel/wechat-official-account-admin/internal/auth"
+	"github.com/anchel/wechat-official-account-admin/internal/cache"
+	"github.com/anchel/wechat-official-account-admin/internal/database"
+	"github.com/anchel/wechat-official-account-admin/internal/logger"
+	"github.com/anchel/wechat-official-account-admin/internal/model"
+	"github.com/anchel/wechat-official-account-admin/internal/queue"
+	"github.com/anchel/wechat-official-account-admin/internal/router"
+	"github.com/anchel/wechat-official-account-admin/internal/telemetry"
+	"github.com/anchel/wechat-official-account-admin/internal/validator"
 	"github.com/spf13/cobra"
-	"go.mongodb.org/mongo-driver/mongo"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
+	"gorm.io/gorm"
+	"golang.org/x/crypto/bcrypt"
 )
+
+//go:embed all:wechat-official-account-admin-fe/dist
+var frontendFS embed.FS
+
+var configFile string
 
 var rootCmd = &cobra.Command{
 	Use:   "woaa",
-	Short: "woaa",
-	Long:  "wechat-official-account-admin, server and frontend",
+	Short: "WeChat Official Account Admin",
+	Long:  "Modern WeChat Official Account Management Platform built with Go, Gin, GORM, PostgreSQL, Redis, Asynq, Casbin and OpenTelemetry",
 	Run: func(cmd *cobra.Command, args []string) {
-		err := run()
-		if err != nil {
-			logger.Error(err.Error())
-			os.Exit(1)
-		}
+		startServer()
 	},
 }
 
+func init() {
+	rootCmd.PersistentFlags().StringVarP(&configFile, "config", "c", "", "path to config file")
+}
+
 func main() {
-	err := rootCmd.Execute()
-	if err != nil {
+	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
 }
 
-//go:embed wechat-official-account-admin-fe/dist
-var frontend embed.FS
-
-func run() error {
-
-	// 初始化日志
-	logger.SetDefault(logger.NewLogger(logger.NewTerminalHandlerWithLevel(os.Stderr, logger.LevelDebug, true)))
-
-	logger.Info("starting run")
-
-	if utils.CheckEnvFile() {
-		logger.Info("loading .env file")
-		err := godotenv.Load()
-		if err != nil {
-			logger.Error("Error loading .env file")
-			return err
-		}
-	}
-
-	logger.Info("starting InitMongoDB")
-	mongoClient, err := mongodb.InitMongoDB()
+func startServer() {
+	// 1. 加载配置 (Viper)
+	cfg, err := config.Load(configFile)
 	if err != nil {
-		logger.Error("Error mongodb.InitMongoDB")
-		return err
+		fmt.Printf("Failed to load config: %v\n", err)
+		os.Exit(1)
 	}
-	// 定期检查mongo数据库健康状态
+
+	// 2. 初始化 Zap 日志
+	_, err = logger.Init(cfg.Server.Mode)
+	if err != nil {
+		fmt.Printf("Failed to init logger: %v\n", err)
+		os.Exit(1)
+	}
+	logger.Info("Starting WeChat Official Account Admin Server...")
+
+	// 3. 初始化 OpenTelemetry
+	shutdownTelemetry, err := telemetry.Init(&cfg.Telemetry)
+	if err != nil {
+		logger.Warn("Failed to init OpenTelemetry", zap.Error(err))
+	} else {
+		defer func() {
+			_ = shutdownTelemetry(context.Background())
+		}()
+	}
+
+	// 4. 初始化数据库 (GORM + PostgreSQL)
+	db, err := database.Init(&cfg.Database)
+	if err != nil {
+		logger.Error("Database connection failed", zap.Error(err))
+		os.Exit(1)
+	}
+
+	// 自动迁移
+	if err := model.AutoMigrate(db); err != nil {
+		logger.Error("Database auto migrate failed", zap.Error(err))
+		os.Exit(1)
+	}
+
+	// 初始化默认管理员用户 (admin / admin123)
+	initDefaultAdmin(db)
+
+	// 5. 初始化 Redis 缓存
+	_, err = cache.Init(&cfg.Redis)
+	if err != nil {
+		logger.Warn("Redis connection failed (caching will be degraded)", zap.Error(err))
+	}
+
+	// 6. 初始化 Asynq 队列
+	_, server, err := queue.Init(cfg)
+	if err == nil && server != nil {
+		queue.StartWorker(server, queue.NewServeMux())
+	} else {
+		logger.Warn("Asynq queue disabled", zap.Error(err))
+	}
+
+	// 7. 初始化 Casbin RBAC
+	_, err = auth.InitCasbin(db)
+	if err != nil {
+		logger.Error("Failed to init Casbin", zap.Error(err))
+		os.Exit(1)
+	}
+
+	// 8. 初始化参数校验器
+	validator.Init()
+
+	// 9. 构建路由与中间件
+	r := router.SetupRouter(&frontendFS)
+
+	srv := &http.Server{
+		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
+		Handler: r,
+	}
+
 	go func() {
-		for {
-			time.Sleep(30 * time.Second)
-			if !mongoClient.HealthCheck(context.Background()) {
-				logger.Warn("Trying to reconnect to MongoDB...")
-				if err := mongoClient.Reconnect(context.Background()); err != nil {
-					logger.Crit("Failed to reconnect to MongoDB", err.Error())
-				}
-			}
+		logger.Info(fmt.Sprintf("Server is listening on :%d", cfg.Server.Port))
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("Server start failed", zap.Error(err))
+			os.Exit(1)
 		}
 	}()
 
-	// 优雅退出
-	defer mongoClient.Disconnect(context.Background())
+	// 优雅关闭
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	logger.Info("Shutting down server...")
 
-	// create gin instance
-	r := gin.New()
-	// err = r.SetTrustedProxies([]string{"127.0.0.1"})
-	// if err != nil {
-	// 	logger.Error("Error r.SetTrustedProxies")
-	// 	return err
-	// }
-	r.Use(gin.Logger())
-
-	excludeLogPaths := []string{
-		"/api/system/user/userinfo",
-		"/api/appid/session_info",
-		"/api/request-log/list",
-	}
-	zcore := logger.NewMongoZapCore[types.GinRequestLogInfo](zap.DebugLevel, func() (*mongo.Collection, error) {
-		return mongoClient.GetCollection("request-logs")
-	})
-	defer zcore.Sync()
-
-	loggerMongo := zap.New(zcore)
-
-	r.Use(ginzap.GinzapWithConfig(loggerMongo, &ginzap.Config{
-		TimeFormat:   time.RFC3339,
-		UTC:          true,
-		DefaultLevel: zap.InfoLevel,
-		Skipper: func(c *gin.Context) bool {
-			result := true
-
-			if strings.HasPrefix(c.Request.URL.Path, "/api/") && !lo.Contains(excludeLogPaths, c.Request.URL.Path) {
-				result = false
-			}
-
-			return result
-		},
-		Context: ginzap.Fn(func(c *gin.Context) []zapcore.Field {
-			fields := []zapcore.Field{}
-			session := sessions.Default(c)
-			appidInfo := session.Get("appid")
-			if appidInfo != nil {
-				app, ok := appidInfo.(types.SessionAppidInfo)
-				if ok {
-					fields = append(fields, zap.String("appid", app.AppID))
-				}
-			}
-			return fields
-		}),
-	}))
-
-	// store request logs in mongodb
-	r.Use(ginzap.RecoveryWithZap(loggerMongo, true))
-
-	// enable session
-	store, err := redis.NewStore(3, "tcp", os.Getenv("REDIS_ADDR"), os.Getenv("REDIS_PASSWORD"), []byte("secret666"))
-	if err != nil {
-		logger.Error("Error redis.NewStore")
-		return err
-	}
-	r.Use(sessions.Sessions("mysession", store))
-
-	// serve frontend assets, such as html,css,image and so on
-	r.Use(static.Serve("/", static.EmbedFolder(frontend, "wechat-official-account-admin-fe/dist")))
-
-	exePath, err := os.Executable()
-	if err != nil {
-		logger.Error("Error os.Executable")
-		return err
-	}
-	wd := filepath.Dir(exePath)
-	r.Static("/files/upload-image", filepath.Join(wd, "files", "upload-image"))           // 上传的图片
-	r.Static("/files/wx-download-media", filepath.Join(wd, "files", "wx-download-media")) // 下载的微信素材
-
-	// enable single page application
-	r.NoRoute(func(c *gin.Context) {
-		logger.Info("NoRoute", "path", c.Request.URL.Path)
-		if strings.HasPrefix(c.Request.URL.Path, "/api/") {
-			c.JSON(http.StatusOK, gin.H{
-				"code":    1,
-				"message": "api not found",
-			})
-			return
-		}
-		accept := c.Request.Header.Get("Accept")
-		if !strings.Contains(accept, "html") {
-			c.JSON(http.StatusOK, gin.H{
-				"code":    1,
-				"message": "not html",
-			})
-			return
-		}
-		c.FileFromFS("/wechat-official-account-admin-fe/dist/template.html", http.FS(frontend))
-	})
-
-	excludeLoginPaths := []string{
-		"/api/system/user/register",
-		"/api/system/user/login",
-		"/api/system/user/userinfo",
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		logger.Error("Server forced to shutdown", zap.Error(err))
 	}
 
-	// check login status
-	// check whether the apis that must work with the official account carries the appid
-	group := r.Group("/api", func(ctx *gin.Context) {
-		path := ctx.Request.URL.Path
-		if lo.Contains(excludeLoginPaths, path) {
-			// logger.Info("check login path exclude", path)
-			ctx.Next()
-		} else {
-			session := sessions.Default(ctx)
-			login, ok := session.Get("login").(int)
-			if !ok || login != 1 {
-				// logger.Info("check login false")
-				ctx.JSON(http.StatusOK, gin.H{
-					"code":    1,
-					"message": "no login",
-				})
-				ctx.Abort()
-			} else {
-				// logger.Info("check login success")
-				ctx.Next()
-			}
-		}
-	}, func(ctx *gin.Context) {
-		path := ctx.Request.URL.Path
+	logger.Info("Server exited properly")
+}
 
-		// 先排除不需要登录态的
-		if lo.Contains(excludeLoginPaths, path) {
-			ctx.Next()
-			return
+func initDefaultAdmin(db *gorm.DB) {
+	var count int64
+	db.Model(&model.User{}).Where("username = ?", "admin").Count(&count)
+	if count == 0 {
+		hash, _ := bcrypt.GenerateFromPassword([]byte("admin123"), bcrypt.DefaultCost)
+		admin := model.User{
+			Username: "admin",
+			Password: string(hash),
+			Nickname: "超级管理员",
+			Role:     "admin",
+			Status:   1,
 		}
-
-		// 再排除不需要appid的
-		if strings.HasPrefix(path, "/api/system/") {
-			ctx.Next()
-			return
-		}
-
-		session := sessions.Default(ctx)
-		appidInfo := session.Get("appid")
-		if appidInfo == nil {
-			ctx.JSON(http.StatusOK, gin.H{
-				"code":    1,
-				"message": "no appid",
-			})
-			ctx.Abort()
-		} else {
-			app, ok := appidInfo.(types.SessionAppidInfo)
-			if ok {
-				ctx.Set("appid", app.AppID)
-				ctx.Next()
-			} else {
-				ctx.JSON(http.StatusOK, gin.H{
-					"code":    1,
-					"message": "no appid",
-				})
-				ctx.Abort()
-			}
-		}
-	})
-	routes.InitRoutes(group)
-
-	// for common redis operation
-	var rdb *redislib.Client
-
-	redisSentinelAddr := os.Getenv("REDIS_SENTINEL_ADDR")
-	if redisSentinelAddr != "" {
-		masterName := os.Getenv("REDIS_SENTINEL_MASTERNAME")
-		if masterName == "" {
-			masterName = "mymaster"
-		}
-		rdb = redislib.NewFailoverClient(&redislib.FailoverOptions{
-			MasterName:    masterName,
-			SentinelAddrs: strings.Split(redisSentinelAddr, ","),
-			Password:      os.Getenv("REDIS_PASSWORD"),
-		})
-	} else {
-		rdb = redislib.NewClient(&redislib.Options{
-			Addr:     os.Getenv("REDIS_ADDR"),
-			Password: os.Getenv("REDIS_PASSWORD"),
-		})
+		db.Create(&admin)
+		logger.Info("Default administrator user created: admin / admin123")
 	}
-
-	gob.Register(types.SessionAppidInfo{})
-
-	// init weixin module
-	err = weixin.InitWeixin(rdb)
-	if err != nil {
-		logger.Error("Error weixin.InitWeixin")
-		return err
-	}
-
-	wxmp := r.Group("/wxmp")
-	wxmp.GET("/:appid/handler", weixin.Serve)
-	wxmp.POST("/:appid/handler", weixin.Serve)
-
-	// server start listening
-	return r.Run(os.Getenv("LISTEN_ADDR"))
 }

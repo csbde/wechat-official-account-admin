@@ -1,42 +1,27 @@
-
 NAME=woaa
 BUILD_DIR=build
 GOBUILD=CGO_ENABLED=0 go build -trimpath -ldflags '-w -s -buildid='
 
-normal: clean default
+.PHONY: all clean default fe linux-amd64 release-linux-amd64
 
-all: clean all-platform
+default: fe
+	$(GOBUILD) -o $(BUILD_DIR)/$(NAME) main.go
 
 clean:
 	rm -rf $(BUILD_DIR)
 
-default:
-	$(GOBUILD) -o $(BUILD_DIR)/$(NAME)
-
-all-platform: linux-amd64 linux-arm64 windows-amd64 darwin-amd64 darwin-arm64
-
-darwin-amd64:
-	GOARCH=amd64 GOOS=darwin $(GOBUILD) -o $(BUILD_DIR)/$(NAME)-$@
-
-darwin-arm64:
-	GOARCH=arm64 GOOS=darwin $(GOBUILD) -o $(BUILD_DIR)/$(NAME)-$@
-
-linux-amd64:
-	GOARCH=amd64 GOOS=linux $(GOBUILD) -o $(BUILD_DIR)/$(NAME)-$@
-
-linux-arm64:
-	GOARCH=arm64 GOOS=linux $(GOBUILD) -o $(BUILD_DIR)/$(NAME)-$@
-
-windows-amd64:
-	GOARCH=amd64 GOOS=windows $(GOBUILD) -o $(BUILD_DIR)/$(NAME)-$@.exe
-
-test:
-	go test -v ./...
-
 fe:
-	cd wechat-official-account-admin-fe && npm ci && npm run build
+	cd wechat-official-account-admin-fe && pnpm install && pnpm build
 
-run:
-	go build -o $(BUILD_DIR)/woaa main.go
-	cp .env $(BUILD_DIR)/.env
-	cd $(BUILD_DIR) && ./woaa
+linux-amd64: fe
+	mkdir -p $(BUILD_DIR)
+	GOARCH=amd64 GOOS=linux $(GOBUILD) -o $(BUILD_DIR)/$(NAME)-linux-amd64 main.go
+
+release-linux-amd64: linux-amd64
+	mkdir -p $(BUILD_DIR)/release
+	cp $(BUILD_DIR)/$(NAME)-linux-amd64 $(BUILD_DIR)/release/$(NAME)
+	cp -r config $(BUILD_DIR)/release/
+	cp -r atlas $(BUILD_DIR)/release/
+	cp .env.example $(BUILD_DIR)/release/
+	cp README.md $(BUILD_DIR)/release/
+	tar -czf $(BUILD_DIR)/$(NAME)-linux-amd64.tar.gz -C $(BUILD_DIR)/release .

@@ -1,0 +1,39 @@
+server:
+  port: 9305
+  mode: debug
+  allow_origins:
+    - "*"
+  static_dir: "./files"
+
+database:
+  host: 127.0.0.1
+  port: 5432
+  user: sc
+  password: sc
+  dbname: woaa
+  sslmode: disable
+  max_open_conns: 50
+  max_idle_conns: 10
+  conn_max_lifetime: 3600
+
+redis:
+  addr: 127.0.0.1:6379
+  password: sc
+  db: 0
+
+asynq:
+  concurrency: 5
+
+jwt:
+  secret: woaa-super-secure-jwt-token-secret-2025
+  expire_hours: 72
+  issuer: woaa-admin
+
+wechat:
+  public_host: ""
+  proxy: ""
+
+telemetry:
+  service_name: wechat-official-account-admin
+  environment: development
+  sample_rate: 1.0
