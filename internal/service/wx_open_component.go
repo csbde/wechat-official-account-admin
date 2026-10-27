@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"net/url"
+	"strings"
 		"time"
 
 	"github.com/anchel/wechat-official-account-admin/internal/cache"
@@ -364,4 +365,168 @@ func (s *WxOpenService) GetAuthorizerInfo(ctx context.Context, componentAppID, a
 	}
 	_ = json.Unmarshal(resp.Body(), &res)
 	return res.AuthorizerInfo, nil
+}
+
+// HandleNetworkPublishCheck 处理微信开放平台全网发布自动化测试用例
+// 返回 (是否命中测试用例, 应答密文XML或空, 错误)
+func (s *WxOpenService) HandleNetworkPublishCheck(ctx context.Context, comp *model.WxOpenComponent, plainXml []byte, timestamp, nonce string) (bool, []byte, error) {
+	var baseMsg WxBaseMessage
+	if err := xml.Unmarshal(plainXml, &baseMsg); err != nil {
+		return false, nil, err
+	}
+
+	crypt, err := NewWxCrypt(comp.Token, comp.EncodingAESKey, comp.ComponentAppID)
+	if err != nil {
+		return false, nil, err
+	}
+
+	content := strings.TrimSpace(baseMsg.Content)
+
+	// =========================================================================
+	// 测试用例 1: 模拟粉丝发送文本消息 (返回普通文本消息)
+	// 文本内容固定为: TESTCOMPONENT_MSG_TYPE_TEXT
+	// 必须被动回复内容为: TESTCOMPONENT_MSG_TYPE_TEXT_callback
+	// =========================================================================
+	if baseMsg.MsgType == "text" && content == "TESTCOMPONENT_MSG_TYPE_TEXT" {
+		logger.Info("[微信全网发布测试] 命中测试用例1: 返回普通文本消息")
+		replyText := "TESTCOMPONENT_MSG_TYPE_TEXT_callback"
+		replyObj := WxTextReply{
+			ToUserName:   baseMsg.FromUserName,
+			FromUserName: baseMsg.ToUserName,
+			CreateTime:   time.Now().Unix(),
+			MsgType:      "text",
+			Content:      replyText,
+		}
+		rawReply, _ := xml.Marshal(replyObj)
+		encryptedReply, err := crypt.EncryptMsg(rawReply, timestamp, nonce)
+		return true, encryptedReply, err
+	}
+
+	// =========================================================================
+	// 测试用例 2: 模拟粉丝发送文本消息 (返回Api文本消息)
+	// 文本内容为: QUERY_AUTH_CODE:xxxx
+	// 必须直接返回空串或 success，同时异步使用 xxxx 换取 token 并调用客服接口发送 xxxx_from_api
+	// =========================================================================
+	if baseMsg.MsgType == "text" && strings.HasPrefix(content, "QUERY_AUTH_CODE:") {
+		authCode := strings.TrimPrefix(content, "QUERY_AUTH_CODE:")
+		logger.Info("[微信全网发布测试] 命中测试用例2: 返回Api文本消息", zap.String("auth_code", authCode))
+
+		// 异步调用客服 API 发送消息
+		go s.sendCustomMessageForNetworkCheck(comp.ComponentAppID, authCode, baseMsg.FromUserName)
+
+		// 微信规定必须直接回复 success 或空
+		return true, []byte("success"), nil
+	}
+
+	// =========================================================================
+	// 测试用例 3: 模拟粉丝发送事件推送消息
+	// 事件类型为: LOCATION 或其他，返回: 事件类型 + "from_callback"
+	// =========================================================================
+	if baseMsg.MsgType == "event" && baseMsg.Event != "" {
+		replyText := baseMsg.Event + "from_callback"
+		logger.Info("[微信全网发布测试] 命中测试用例3: 事件消息回复", zap.String("reply", replyText))
+		replyObj := WxTextReply{
+			ToUserName:   baseMsg.FromUserName,
+			FromUserName: baseMsg.ToUserName,
+			CreateTime:   time.Now().Unix(),
+			MsgType:      "text",
+			Content:      replyText,
+		}
+		rawReply, _ := xml.Marshal(replyObj)
+		encryptedReply, err := crypt.EncryptMsg(rawReply, timestamp, nonce)
+		return true, encryptedReply, err
+	}
+
+	return false, nil, nil
+}
+
+// 异步换取 token 并调用微信客服消息接口
+func (s *WxOpenService) sendCustomMessageForNetworkCheck(componentAppID, authCode, toUser string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// 1. 获取 component_access_token
+	compToken, err := s.GetComponentAccessToken(ctx, componentAppID)
+	if err != nil {
+		logger.Error("[微信全网发布测试] 获取 component_access_token 失败", zap.Error(err))
+		return
+	}
+
+	// 2. 用 authCode 换取该测试公众号的 authorizer_access_token
+	queryURL := fmt.Sprintf("https://api.weixin.qq.com/cgi-bin/component/api_query_auth?component_access_token=%s", compToken)
+	resp, err := s.http.R().SetContext(ctx).SetBody(map[string]string{
+		"component_appid":    componentAppID,
+		"authorization_code": authCode,
+	}).Post(queryURL)
+	if err != nil {
+		logger.Error("[微信全网发布测试] api_query_auth 请求失败", zap.Error(err))
+		return
+	}
+
+	var authRes struct {
+		AuthorizationInfo struct {
+			AuthorizerAppid       string `json:"authorizer_appid"`
+			AuthorizerAccessToken string `json:"authorizer_access_token"`
+		} `json:"authorization_info"`
+		Errcode int    `json:"errcode"`
+		Errmsg  string `json:"errmsg"`
+	}
+	if err := json.Unmarshal(resp.Body(), &authRes); err != nil || authRes.Errcode != 0 {
+		logger.Error("[微信全网发布测试] api_query_auth 解析失败", zap.String("body", resp.String()))
+		return
+	}
+
+	authorizerAccessToken := authRes.AuthorizationInfo.AuthorizerAccessToken
+	logger.Info("[微信全网发布测试] 成功换取测试公众号令牌",
+		zap.String("appid", authRes.AuthorizationInfo.AuthorizerAppid),
+		zap.String("token", authorizerAccessToken),
+	)
+
+	// 3. 调用微信客服接口发送 content + "_from_api"
+	customSendURL := fmt.Sprintf("https://api.weixin.qq.com/cgi-bin/message/custom/send?access_token=%s", authorizerAccessToken)
+	msgPayload := map[string]interface{}{
+		"touser":  toUser,
+		"msgtype": "text",
+		"text": map[string]string{
+			"content": authCode + "_from_api",
+		},
+	}
+
+	cResp, cErr := s.http.R().SetContext(ctx).SetBody(msgPayload).Post(customSendURL)
+	if cErr != nil {
+		logger.Error("[微信全网发布测试] 客服消息发送网络错误", zap.Error(cErr))
+		return
+	}
+
+	logger.Info("[微信全网发布测试] 客服消息已成功发送至微信！",
+		zap.String("to_user", toUser),
+		zap.String("response", cResp.String()),
+	)
+}
+
+// StartPushTicket 调用微信官方接口，触发微信服务器立即向授权事件接收URL推送最新的 component_verify_ticket (无需干等10分钟)
+func (s *WxOpenService) StartPushTicket(ctx context.Context, componentAppID, componentSecret string) error {
+	apiURL := "https://api.weixin.qq.com/cgi-bin/component/api_start_push_ticket"
+	resp, err := s.http.R().SetContext(ctx).SetBody(map[string]string{
+		"component_appid":  componentAppID,
+		"component_secret": componentSecret,
+	}).Post(apiURL)
+
+	if err != nil {
+		return fmt.Errorf("调用微信 api_start_push_ticket 失败: %w", err)
+	}
+
+	var res struct {
+		Errcode int    `json:"errcode"`
+		Errmsg  string `json:"errmsg"`
+	}
+	if err := json.Unmarshal(resp.Body(), &res); err != nil {
+		return fmt.Errorf("解析微信响应失败: %w", err)
+	}
+	if res.Errcode != 0 {
+		return fmt.Errorf("[%d] %s", res.Errcode, res.Errmsg)
+	}
+
+	logger.Info("[微信开放平台] 已成功请求微信服务器立即重新推送 Ticket", zap.String("appid", componentAppID))
+	return nil
 }

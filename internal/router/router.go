@@ -148,6 +148,8 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 		protected.POST("/open/component", openHandler.SaveComponent)
 		protected.GET("/open/auth-url", openHandler.GetAuthURL)
 		protected.GET("/open/auth-callback", openHandler.AuthCallback)
+		protected.POST("/open/request-ticket", openHandler.RequestPushTicket)
+		protected.POST("/open/manual-ticket", openHandler.ManualSetTicket)
 
 		// 公众号管理 (租户隔离)
 		accountHandler := &handler.AccountHandler{}

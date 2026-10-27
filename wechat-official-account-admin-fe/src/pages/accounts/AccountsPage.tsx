@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/dialog'
 import {
   Plus,
+  RefreshCw,
   Smartphone,
   Copy,
   Trash2,
@@ -92,6 +93,8 @@ export const AccountsPage: React.FC = () => {
   const [compSecret, setCompSecret] = useState('')
   const [compToken, setCompToken] = useState('')
   const [compAesKey, setCompAesKey] = useState('')
+  const [manualTicket, setManualTicket] = useState('')
+  const [requestingTicket, setRequestingTicket] = useState(false)
 
   // 打开第三方平台配置时回填
   const handleOpenCompSettings = () => {
@@ -103,6 +106,36 @@ export const AccountsPage: React.FC = () => {
       setCompAesKey(openComp.encoding_aes_key || '')
     }
     setOpenComponentModal(true)
+  }
+
+  // 一键请求微信立即推送 Ticket
+  const handleRequestPushTicket = async () => {
+    try {
+      setRequestingTicket(true)
+      const res: any = await api.post('/api/open/request-ticket')
+      toast.success(res.message || '已成功向微信服务器发送请求，请等待约 10 秒后刷新查看')
+      setTimeout(() => queryClient.invalidateQueries({ queryKey: ['open-component'] }), 6000)
+    } catch (e: any) {
+      toast.error('请求失败: ' + (e.message || '请检查网络或第三方凭证是否有效'))
+    } finally {
+      setRequestingTicket(false)
+    }
+  }
+
+  // 手动保存 Ticket
+  const handleSaveManualTicket = async () => {
+    if (!manualTicket.trim()) {
+      toast.error('请输入 Ticket 字符串')
+      return
+    }
+    try {
+      const res: any = await api.post('/api/open/manual-ticket', { ticket: manualTicket.trim() })
+      toast.success(res.message || 'Ticket 更新成功！')
+      queryClient.invalidateQueries({ queryKey: ['open-component'] })
+      setManualTicket('')
+    } catch (e: any) {
+      toast.error('保存失败: ' + (e.message || '网络错误'))
+    }
   }
 
   // 保存第三方平台凭据
@@ -460,6 +493,55 @@ export const AccountsPage: React.FC = () => {
                 </div>
               </div>
             )}
+
+            {/* Ticket 状态与极速自愈控制 */}
+            <div className="p-3 rounded-xl border bg-muted/40 space-y-2.5 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-foreground flex items-center gap-1.5">
+                  <span>ComponentVerifyTicket 状态:</span>
+                  {openComp?.verify_ticket ? (
+                    <Badge variant="success" className="text-[10px] py-0">已就绪</Badge>
+                  ) : (
+                    <Badge variant="destructive" className="text-[10px] py-0">未接收到</Badge>
+                  )}
+                </span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={handleRequestPushTicket}
+                  disabled={requestingTicket}
+                  className="h-7 text-[11px] gap-1 text-primary border-primary/40 hover:bg-primary/10"
+                  title="调用微信官方接口触发立即推送，无需等待10分钟"
+                >
+                  <RefreshCw className={`h-3 w-3 ${requestingTicket ? 'animate-spin' : ''}`} />
+                  <span>{requestingTicket ? '请求中...' : '一键请求微信立即推送'}</span>
+                </Button>
+              </div>
+
+              {openComp?.verify_ticket ? (
+                <div className="p-2 bg-background/60 rounded font-mono text-[11px] truncate select-all text-muted-foreground">
+                  {openComp.verify_ticket}
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-[11px] text-muted-foreground">
+                    💡 提示：微信通常每隔 10 分钟自动推送一次 Ticket。若刚刚部署，可点击右上方「一键请求微信立即推送」，微信将在数秒内推送到您的授权接收 URL；或手动在下方粘贴生效：
+                  </p>
+                  <div className="flex gap-1.5">
+                    <Input
+                      value={manualTicket}
+                      onChange={(e) => setManualTicket(e.target.value)}
+                      placeholder="在此手动粘贴 Ticket (选填)"
+                      className="h-7 text-xs font-mono flex-1"
+                    />
+                    <Button type="button" size="sm" onClick={handleSaveManualTicket} className="h-7 text-xs px-2.5">
+                      手动生效
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
 
             <div className="space-y-1.5">
               <label className="text-xs font-semibold">第三方平台名称 *</label>
