@@ -214,9 +214,30 @@ func AutoMigrate(db *gorm.DB) error {
 		&WxMenu{},
 		&WxMaterial{},
 		&WxAutoReply{},
+		&WxAISetting{},
 		&WxFan{},
 		&WxTag{},
 		&WxQrcode{},
 		&RequestLog{},
 	)
+}
+
+// WxAISetting 微信公众号 AI 智能助手设置 (兼容 ChatGPT / OpenAI 规范)
+type WxAISetting struct {
+	ID           uint           `gorm:"primaryKey" json:"id"`
+	TenantID     uint           `gorm:"index;not null;default:1" json:"tenant_id"`
+	AppID        string         `gorm:"size:64;index;not null" json:"appid"`
+	Enabled      bool           `gorm:"default:false" json:"enabled"`
+	Provider     string         `gorm:"size:64;default:'openai'" json:"provider"` // openai, deepseek, qwen, moonshot, ollama, custom
+	BaseURL      string         `gorm:"size:255;default:'https://api.openai.com/v1'" json:"base_url"`
+	APIKey       string         `gorm:"size:255" json:"api_key"`
+	Model        string         `gorm:"size:64;default:'gpt-4o-mini'" json:"model"`
+	SystemPrompt string         `gorm:"type:text" json:"system_prompt"`
+	Temperature  float64        `gorm:"default:0.7" json:"temperature"`
+	MaxTokens    int            `gorm:"default:800" json:"max_tokens"`
+	MatchMode    string         `gorm:"size:32;default:'fallback'" json:"match_mode"` // fallback: 未命中关键词时AI回复, all: 全部消息由AI回复
+	TimeoutSec   int            `gorm:"default:4" json:"timeout_sec"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+	DeletedAt    gorm.DeletedAt `gorm:"index" json:"-"`
 }

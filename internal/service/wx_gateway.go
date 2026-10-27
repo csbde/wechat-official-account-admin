@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/xml"
-		"strings"
+	"strings"
 	"time"
 
 	"github.com/anchel/wechat-official-account-admin/internal/database"
@@ -53,7 +53,6 @@ func HandleWxMessage(ctx context.Context, appid string, rawXml []byte) ([]byte, 
 	if msg.MsgType == "event" {
 		switch strings.ToLower(msg.Event) {
 		case "subscribe":
-			// 记录或更新关注者
 			go recordFanSubscribe(appid, msg.FromUserName, msg.EventKey)
 			return matchAndBuildReply(appid, "subscribe", "", msg.FromUserName, msg.ToUserName)
 		case "unsubscribe":
@@ -64,17 +63,49 @@ func HandleWxMessage(ctx context.Context, appid string, rawXml []byte) ([]byte, 
 		}
 	}
 
-	// 处理文本消息自动回复
+	// 处理文本消息自动回复 (支持关键词、AI ChatGPT 回复与默认兜底回复)
 	if msg.MsgType == "text" {
-		reply, err := matchAndBuildReply(appid, "keyword", strings.TrimSpace(msg.Content), msg.FromUserName, msg.ToUserName)
+		userText := strings.TrimSpace(msg.Content)
+
+		// 1. 尝试匹配固定关键词回复规则
+		reply, err := matchAndBuildReply(appid, "keyword", userText, msg.FromUserName, msg.ToUserName)
 		if err == nil && reply != nil {
 			return reply, nil
 		}
-		// 默认回复
+
+		// 2. 尝试调用 AI 智能机器人回复 (兼容 ChatGPT / OpenAI 规范)
+		aiReply, err := tryAIReply(ctx, appid, userText, msg.FromUserName, msg.ToUserName)
+		if err == nil && aiReply != nil {
+			return aiReply, nil
+		}
+
+		// 3. 兜底默认消息回复
 		return matchAndBuildReply(appid, "default", "", msg.FromUserName, msg.ToUserName)
 	}
 
 	return nil, nil
+}
+
+func tryAIReply(ctx context.Context, appid, userContent, toUser, fromUser string) ([]byte, error) {
+	aiText, err := DefaultAIService.GenerateAIResponse(ctx, appid, userContent)
+	if err != nil || aiText == "" {
+		return nil, err
+	}
+
+	logger.Info("Generated AI auto reply for WeChat user",
+		zap.String("appid", appid),
+		zap.String("to_user", toUser),
+		zap.String("ai_reply", aiText),
+	)
+
+	reply := WxTextReply{
+		ToUserName:   toUser,
+		FromUserName: fromUser,
+		CreateTime:   time.Now().Unix(),
+		MsgType:      "text",
+		Content:      aiText,
+	}
+	return xml.Marshal(reply)
 }
 
 func recordFanSubscribe(appid, openid, eventKey string) {
@@ -82,6 +113,7 @@ func recordFanSubscribe(appid, openid, eventKey string) {
 	err := database.DB.Where("app_id = ? AND open_id = ?", appid, openid).First(&fan).Error
 	if err != nil {
 		fan = model.WxFan{
+			TenantID:       1,
 			AppID:          appid,
 			OpenID:         openid,
 			Subscribe:      1,

@@ -182,12 +182,15 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 			tenant.DELETE("/materials/:id", materialHandler.Delete)
 			tenant.GET("/materials/:id/preview", materialHandler.Preview)
 
-			// 自动回复
+			// 自动回复与 AI 智能助手接入 (兼容 ChatGPT 规范)
 			replyHandler := &handler.ReplyHandler{}
 			tenant.GET("/autoreply", replyHandler.List)
 			tenant.POST("/autoreply", replyHandler.Save)
 			tenant.DELETE("/autoreply/:id", replyHandler.Delete)
 			tenant.PUT("/autoreply/:id/toggle", replyHandler.Toggle)
+			tenant.GET("/autoreply/ai", replyHandler.GetAISetting)
+			tenant.POST("/autoreply/ai", replyHandler.SaveAISetting)
+			tenant.POST("/autoreply/ai/test", replyHandler.TestAIConnection)
 
 			// 粉丝与标签
 			fanHandler := &handler.FanHandler{}
