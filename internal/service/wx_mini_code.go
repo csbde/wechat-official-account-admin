@@ -64,7 +64,7 @@ func (s *WxMiniService) callMiniJSON(ctx context.Context, token, method, apiPath
 		return fmt.Errorf("解析微信响应失败: %v (原始响应: %s)", e, snippet(raw))
 	}
 	if base.Errcode != 0 {
-		return fmt.Errorf("[%d] %s", base.Errcode, base.Errmsg)
+		return FriendlyWxError(fmt.Errorf("[%d] %s", base.Errcode, base.Errmsg))
 	}
 	if out != nil {
 		if e := json.Unmarshal(raw, out); e != nil {

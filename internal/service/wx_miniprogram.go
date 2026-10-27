@@ -49,7 +49,7 @@ func (s *WxMiniService) CreateFastRegisterTask(ctx context.Context, componentApp
 		return fmt.Errorf("解析响应失败: %w", err)
 	}
 	if res.Errcode != 0 {
-		return fmt.Errorf("[%d] %s", res.Errcode, res.Errmsg)
+		return FriendlyWxError(fmt.Errorf("[%d] %s", res.Errcode, res.Errmsg))
 	}
 
 	logger.Info("[快速注册小程序] 任务已成功提交至微信服务器", zap.String("enterprise", p.Name), zap.String("legal_wechat", p.LegalPersonaWechat))
@@ -117,7 +117,7 @@ func (s *WxMiniService) SearchFastRegisterTask(ctx context.Context, componentApp
 		result.RejectReason = res.Errmsg
 
 	default:
-		return nil, fmt.Errorf("[%d] %s", res.Errcode, res.Errmsg)
+		return nil, FriendlyWxError(fmt.Errorf("[%d] %s", res.Errcode, res.Errmsg))
 	}
 
 	return result, nil
@@ -156,7 +156,7 @@ func (s *WxMiniService) ModifyServerDomain(ctx context.Context, authorizerAppID 
 		return err
 	}
 	if res.Errcode != 0 {
-		return fmt.Errorf("modify domain error: [%d] %s", res.Errcode, res.Errmsg)
+		return FriendlyWxError(fmt.Errorf("modify domain error: [%d] %s", res.Errcode, res.Errmsg))
 	}
 
 	return nil
@@ -232,7 +232,7 @@ func (s *WxMiniService) GetLinkedMiniPrograms(ctx context.Context, officialAppID
 		return nil, fmt.Errorf("解析微信关联小程序响应失败: %w", err)
 	}
 	if res.Errcode != 0 {
-		return nil, fmt.Errorf("[%d] %s", res.Errcode, res.Errmsg)
+		return nil, FriendlyWxError(fmt.Errorf("[%d] %s", res.Errcode, res.Errmsg))
 	}
 
 	return res.WxOpens.Items, nil
@@ -267,7 +267,7 @@ func (s *WxMiniService) LinkMiniProgram(ctx context.Context, officialAppID, mini
 		return err
 	}
 	if res.Errcode != 0 {
-		return fmt.Errorf("[%d] %s", res.Errcode, res.Errmsg)
+		return FriendlyWxError(fmt.Errorf("[%d] %s", res.Errcode, res.Errmsg))
 	}
 
 	return nil
@@ -300,7 +300,7 @@ func (s *WxMiniService) UnlinkMiniProgram(ctx context.Context, officialAppID, mi
 		return err
 	}
 	if res.Errcode != 0 {
-		return fmt.Errorf("[%d] %s", res.Errcode, res.Errmsg)
+		return FriendlyWxError(fmt.Errorf("[%d] %s", res.Errcode, res.Errmsg))
 	}
 
 	return nil
@@ -348,7 +348,7 @@ func (s *WxMiniService) GetTemplateDraftList(ctx context.Context, componentAppID
 		return nil, err
 	}
 	if res.Errcode != 0 {
-		return nil, fmt.Errorf("[%d] %s", res.Errcode, res.Errmsg)
+		return nil, FriendlyWxError(fmt.Errorf("[%d] %s", res.Errcode, res.Errmsg))
 	}
 
 	return res.DraftList, nil
@@ -378,7 +378,7 @@ func (s *WxMiniService) AddDraftToTemplate(ctx context.Context, componentAppID s
 		return err
 	}
 	if res.Errcode != 0 {
-		return fmt.Errorf("[%d] %s", res.Errcode, res.Errmsg)
+		return FriendlyWxError(fmt.Errorf("[%d] %s", res.Errcode, res.Errmsg))
 	}
 
 	return nil
@@ -406,7 +406,7 @@ func (s *WxMiniService) GetTemplateList(ctx context.Context, componentAppID stri
 		return nil, err
 	}
 	if res.Errcode != 0 {
-		return nil, fmt.Errorf("[%d] %s", res.Errcode, res.Errmsg)
+		return nil, FriendlyWxError(fmt.Errorf("[%d] %s", res.Errcode, res.Errmsg))
 	}
 
 	return res.TemplateList, nil
@@ -435,7 +435,7 @@ func (s *WxMiniService) DeleteTemplate(ctx context.Context, componentAppID strin
 		return err
 	}
 	if res.Errcode != 0 {
-		return fmt.Errorf("[%d] %s", res.Errcode, res.Errmsg)
+		return FriendlyWxError(fmt.Errorf("[%d] %s", res.Errcode, res.Errmsg))
 	}
 
 	return nil

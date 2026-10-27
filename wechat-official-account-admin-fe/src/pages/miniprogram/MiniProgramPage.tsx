@@ -28,6 +28,7 @@ import {
   Globe,
   CheckCircle2,
   AlertCircle,
+  ShieldAlert,
   Clock,
   Sparkles,
   ShieldCheck,
@@ -125,16 +126,21 @@ export const MiniProgramPage: React.FC = () => {
     enabled: !!currentApp && activeTab === 'domain',
   })
 
+  // 「公众号关联小程序」是微信开放平台第三方代调用接口 (权限集 id=33)，
+  // 直连凭据账号调用必被微信拒绝 (48001)，因此提前判定账号类型，避免每次切页都报错弹窗
+  const isThirdPartyOfficial = currentApp?.account_type === 'authorized'
+
   // 公众号关联的小程序列表
   const {
     data: linkedRes,
     isLoading: loadingLinked,
     refetch: refetchLinked,
     isFetching: fetchingLinked,
+    error: linkedError,
   } = useQuery<any>({
     queryKey: ['miniprogram-linked', currentApp?.appid],
     queryFn: () => api.get('/api/miniprogram/linked'),
-    enabled: !!currentApp && activeTab === 'linked',
+    enabled: !!currentApp && activeTab === 'linked' && isThirdPartyOfficial,
   })
 
   // 代码模板库
@@ -487,10 +493,31 @@ export const MiniProgramPage: React.FC = () => {
                 )
                 }。<br />
                 2. 一个公众号最多可关联 <strong>10 个</strong>小程序；关联需小程序管理员在微信内确认。<br />
-                3. <strong>show_profile = 1</strong> 时，该小程序会在公众号资料页 (我的-关注公众号) 中展示入口。
+                3. <strong>show_profile = 1</strong> 时，该小程序会在公众号资料页 (我的-关注公众号) 中展示入口。<br />
+                4. 微信官方限定：本组接口 (wxamplinkget / wxamplink / wxampunlink) 属于<strong>第三方平台代调用</strong>能力 (权限集 id=33)，
+                   账号必须通过<strong>「微信扫码一键授权接入」</strong>托管才能查询与操作。
               </div>
             </div>
           </div>
+
+          {!isThirdPartyOfficial && (
+            <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/25 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-3">
+              <ShieldAlert className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+              <div className="space-y-1 leading-relaxed">
+                <div className="font-semibold text-sm">
+                  当前账号「{currentApp?.name || '未选择'}」是
+                  {currentApp?.account_type === 'miniprogram' ? '小程序' : '直连凭据'}接入，无法查询关联小程序
+                </div>
+                <div>
+                  微信未向直连凭据账号开放「公众号关联小程序」接口，强行调用会返回
+                  <code className="font-mono mx-1">[48001] api unauthorized</code>。
+                  请前往「公众号与开放平台」，用<strong>微信扫码一键授权</strong>把该公众号托管给第三方平台
+                  (授权时勾选<strong>「小程序关联管理」权限集</strong>)，再回到本页操作；
+                  也可以直接登录微信公众平台后台，在「小程序管理」中手动查看与关联。
+                </div>
+              </div>
+            </div>
+          )}
 
           <Card>
             <CardHeader className="pb-3">
@@ -519,6 +546,21 @@ export const MiniProgramPage: React.FC = () => {
                   {loadingLinked ? (
                     <TableRow>
                       <TableCell colSpan={8} className="h-32 text-center text-muted-foreground">正在向微信官方调取关联列表...</TableCell>
+                    </TableRow>
+                  ) : !isThirdPartyOfficial ? (
+                    <TableRow>
+                      <TableCell colSpan={8} className="h-32 text-center text-muted-foreground">
+                        当前账号不是第三方平台授权托管，未发起查询 (见上方说明)
+                      </TableCell>
+                    </TableRow>
+                  ) : linkedError ? (
+                    <TableRow>
+                      <TableCell colSpan={8} className="h-32 text-center text-red-600 break-words">
+                        查询失败: {(linkedError as any)?.message || '微信接口返回错误'}
+                        <Button size="sm" variant="outline" className="ml-3 h-7 text-[11px]" onClick={() => refetchLinked()}>
+                          重试
+                        </Button>
+                      </TableCell>
                     </TableRow>
                   ) : linkedList.length > 0 ? (
                     linkedList.map((mp: any) => {

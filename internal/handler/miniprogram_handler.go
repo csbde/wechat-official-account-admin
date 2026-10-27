@@ -287,11 +287,37 @@ func (h *MiniProgramHandler) Code2Session(c *gin.Context) {
 	Ok(c, res)
 }
 
+// requireThirdPartyOfficial 校验当前账号是否为「第三方平台授权托管」的公众号。
+// 公众号关联小程序 (wxamplinkget / wxamplink / wxampunlink) 属于微信开放平台的第三方代调用接口
+// (权限集 id=33)，官方文档「适用范围」明确：其他账号类型均不可调用，直连凭据账号调用会返回 48001。
+func (h *MiniProgramHandler) requireThirdPartyOfficial(c *gin.Context) string {
+	appid := GetAppID(c)
+	if appid == "" {
+		Fail(c, http.StatusBadRequest, "请在顶部先选择一个微信公众号")
+		return ""
+	}
+
+	var account model.WxAccount
+	if err := database.DB.Where("app_id = ? AND enabled = ?", appid, true).First(&account).Error; err != nil {
+		Fail(c, http.StatusBadRequest, "该公众号未在系统中启用或不存在，请先在「公众号与开放平台」中完成接入")
+		return ""
+	}
+	if account.AccountType == "miniprogram" {
+		Fail(c, http.StatusBadRequest, "当前选中的是小程序账号，「关联小程序」需要切换到公众号账号后再操作")
+		return ""
+	}
+	if account.AccountType != "authorized" || account.ComponentAppID == "" {
+		Fail(c, http.StatusBadRequest, fmt.Sprintf(
+			"公众号 %s 是「直连凭据」接入，无法查询或管理关联小程序：该能力是微信开放平台的第三方代调用接口 (权限集 id=33)，直连 access_token 调用会被微信拒绝 (48001 api unauthorized)。请在「公众号与开放平台」中改用「微信扫码一键授权接入」托管该公众号 (授权时勾选「小程序关联管理」权限集)，或直接登录微信公众平台后台手动管理关联。", appid))
+		return ""
+	}
+	return appid
+}
+
 // GetLinkedMiniPrograms 获取当前微信公众号关联的小程序列表
 func (h *MiniProgramHandler) GetLinkedMiniPrograms(c *gin.Context) {
-	officialAppID := GetAppID(c)
+	officialAppID := h.requireThirdPartyOfficial(c)
 	if officialAppID == "" {
-		Fail(c, http.StatusBadRequest, "请在顶部先选择一个微信公众号")
 		return
 	}
 
@@ -309,9 +335,8 @@ func (h *MiniProgramHandler) GetLinkedMiniPrograms(c *gin.Context) {
 
 // LinkMiniProgram 为当前微信公众号关联指定小程序
 func (h *MiniProgramHandler) LinkMiniProgram(c *gin.Context) {
-	officialAppID := GetAppID(c)
+	officialAppID := h.requireThirdPartyOfficial(c)
 	if officialAppID == "" {
-		Fail(c, http.StatusBadRequest, "请在顶部先选择一个微信公众号")
 		return
 	}
 
@@ -338,9 +363,8 @@ func (h *MiniProgramHandler) LinkMiniProgram(c *gin.Context) {
 
 // UnlinkMiniProgram 解除公众号与小程序的关联
 func (h *MiniProgramHandler) UnlinkMiniProgram(c *gin.Context) {
-	officialAppID := GetAppID(c)
+	officialAppID := h.requireThirdPartyOfficial(c)
 	if officialAppID == "" {
-		Fail(c, http.StatusBadRequest, "请在顶部先选择一个微信公众号")
 		return
 	}
 
