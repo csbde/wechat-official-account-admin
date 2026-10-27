@@ -72,6 +72,7 @@ func initDefaultPolicies(e *casbin.Enforcer) {
 		{"operator", "/api/fans.*", ".*"},
 		{"operator", "/api/qrcode.*", ".*"},
 		{"operator", "/api/miniprogram.*", ".*"},
+		{"operator", "/api/notify.*", ".*"},
 		{"operator", "/api/logs.*", "GET"},
 		{"operator", "/api/wxgate/.*", ".*"},
 		{"operator", "/api/auth/.*", ".*"},

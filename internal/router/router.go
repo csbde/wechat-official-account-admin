@@ -267,6 +267,27 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 			tenant.GET("/miniprogram/testers", miniHandler.GetTesters)
 			tenant.POST("/miniprogram/testers/bind", miniHandler.BindTester)
 			tenant.POST("/miniprogram/testers/unbind", miniHandler.UnbindTester)
+
+			// 消息模板体系: 公众号模板消息 (行业 / 模板库 / 发送 / 一次性订阅 / 拦截查询)
+			notifyHandler := &handler.NotifyHandler{}
+			tenant.GET("/notify/oa/industry", notifyHandler.GetIndustry)
+			tenant.POST("/notify/oa/industry", notifyHandler.SetIndustry)
+			tenant.GET("/notify/oa/templates", notifyHandler.ListTemplates)
+			tenant.POST("/notify/oa/templates", notifyHandler.AddTemplate)
+			tenant.POST("/notify/oa/templates/delete", notifyHandler.DeleteTemplate)
+			tenant.POST("/notify/oa/send", notifyHandler.SendTemplateMsg)
+			tenant.POST("/notify/oa/one-time", notifyHandler.SendOneTimeSubscribe)
+			tenant.POST("/notify/oa/blocked", notifyHandler.QueryBlocked)
+
+			// 消息模板体系: 订阅消息 (类目 / 公共模板库 / 我的模板库 / 发送)
+			tenant.GET("/notify/sub/categories", notifyHandler.SubCategories)
+			tenant.GET("/notify/sub/pub-titles", notifyHandler.SubPubTitles)
+			tenant.GET("/notify/sub/pub-keywords", notifyHandler.SubPubKeywords)
+			tenant.GET("/notify/sub/templates", notifyHandler.SubMyTemplates)
+			tenant.POST("/notify/sub/templates", notifyHandler.SubAddTemplate)
+			tenant.POST("/notify/sub/templates/delete", notifyHandler.SubDeleteTemplate)
+			tenant.POST("/notify/sub/send", notifyHandler.SubSend)
+			tenant.POST("/notify/sub/bizsend", notifyHandler.SubBizSend)
 		}
 	}
 

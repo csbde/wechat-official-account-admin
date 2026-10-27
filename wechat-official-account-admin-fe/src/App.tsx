@@ -14,6 +14,7 @@ import { MaterialsPage } from '@/pages/materials/MaterialsPage'
 import { AutoReplyPage } from '@/pages/autoreply/AutoReplyPage'
 import { FansPage } from '@/pages/fans/FansPage'
 import { QrcodePage } from '@/pages/qrcode/QrcodePage'
+import { NotifyPage } from '@/pages/notify/NotifyPage'
 import { LogsPage } from '@/pages/logs/LogsPage'
 import { SystemPage } from '@/pages/system/SystemPage'
 
@@ -109,6 +110,8 @@ export const App: React.FC = () => {
         return <FansPage />
       case 'qrcode':
         return <QrcodePage />
+      case 'notify':
+        return <NotifyPage />
       case 'logs':
         return <LogsPage />
       case 'system':

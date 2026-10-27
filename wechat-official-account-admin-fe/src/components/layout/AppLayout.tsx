@@ -18,6 +18,7 @@ import {
   Radio,
   ShieldAlert,
   Zap,
+  BellRing,
 } from 'lucide-react'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore, WxAccount } from '@/stores/app'
@@ -68,6 +69,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentTab, onTabChange, c
     { id: 'autoreply', label: '智能自动回复', icon: MessageSquareReply, requiresApp: true },
     { id: 'fans', label: '粉丝与标签', icon: Users, requiresApp: true },
     { id: 'qrcode', label: '带参二维码', icon: QrCode, requiresApp: true },
+    { id: 'notify', label: '模板与订阅消息', icon: BellRing, requiresApp: true },
     { id: 'logs', label: '请求与追踪日志', icon: FileText },
     { id: 'system', label: '系统与权限', icon: Settings, adminOnly: true },
   ].filter(item => !item.adminOnly || user?.role === 'admin' || user?.role === 'superadmin')
