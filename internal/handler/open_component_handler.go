@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"time"
 	"github.com/anchel/wechat-official-account-admin/internal/cache"
@@ -168,83 +169,86 @@ func (h *OpenComponentHandler) AuthCallback(c *gin.Context) {
 		appID = account.AppID
 	}
 
-	// 返回极具科技感、优雅的 HTML 授权成功反馈页面，并自动通知父窗口刷新与跳转
-	successHTML := fmt.Sprintf(`<!DOCTYPE html>
+	// 返回极具科技感、优雅的 HTML 授权成功反馈页面 (使用清晰明确的模板替换，彻底解决 %!s(EXTRA string=...) 乱符打乱页面 Bug)
+	templateHTML := `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>微信公众号授权成功</title>
   <style>
+    * { box-sizing: border-box; }
     body {
       margin: 0; padding: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: linear-gradient(135deg, #064e3b 0%%, #0f172a 100%%);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif;
+      background: linear-gradient(135deg, #064e3b 0%, #0f172a 100%);
       color: #fff; min-height: 100vh;
       display: flex; align-items: center; justify-content: center;
     }
     .card {
-      background: rgba(30, 41, 59, 0.85);
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      backdrop-filter: blur(16px);
+      background: rgba(30, 41, 59, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      backdrop-filter: blur(20px);
       border-radius: 24px;
-      padding: 40px 32px;
+      padding: 44px 32px;
       text-align: center;
-      max-width: 420px;
-      width: 90%%;
+      max-width: 440px;
+      width: 90%;
       box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
     }
-    .icon {
-      width: 64px; height: 64px;
+    .icon-box {
+      width: 68px; height: 68px;
       margin: 0 auto 20px;
-      border-radius: 50%%;
+      border-radius: 50%;
       background: rgba(16, 185, 129, 0.2);
+      border: 2px solid rgba(16, 185, 129, 0.4);
       display: flex; align-items: center; justify-content: center;
-      color: #10b981; font-size: 36px; font-weight: bold;
+      color: #10b981; font-size: 34px; font-weight: bold;
     }
-    h2 { margin: 0 0 10px; font-size: 22px; font-weight: 700; }
-    p { margin: 0 0 24px; font-size: 14px; color: #94a3b8; line-height: 1.6; }
+    h2 { margin: 0 0 10px; font-size: 22px; font-weight: 700; letter-spacing: -0.5px; }
     .badge {
       display: inline-block;
-      padding: 6px 14px;
+      padding: 6px 16px;
       background: rgba(16, 185, 129, 0.15);
-      border: 1px solid rgba(16, 185, 129, 0.3);
+      border: 1px solid rgba(16, 185, 129, 0.35);
       color: #34d399;
       border-radius: 999px;
       font-size: 13px; font-weight: 600;
-      margin-bottom: 24px;
+      margin-bottom: 20px;
     }
+    p { margin: 0 0 24px; font-size: 13.5px; color: #94a3b8; line-height: 1.6; }
     .btn {
-      display: block; width: 100%%;
-      padding: 12px 0;
+      display: block; width: 100%;
+      padding: 13px 0;
       border-radius: 12px;
       background: #059669;
       color: #fff;
       text-decoration: none;
       font-weight: 600; font-size: 14px;
       cursor: pointer; border: none;
-      transition: background 0.2s;
+      transition: background 0.2s, transform 0.1s;
     }
     .btn:hover { background: #047857; }
+    .btn:active { transform: scale(0.99); }
+    #countdown { color: #34d399; font-weight: bold; font-family: monospace; }
   </style>
 </head>
 <body>
   <div class="card">
-    <div class="icon">✓</div>
+    <div class="icon-box">✓</div>
     <h2>授权接入成功！</h2>
-    <div class="badge">已托管: %s</div>
-    <p>您的微信公众号已成功授权并委托给本平台代管，所有微信功能与接口已自动就绪。<br>页面将在 <span id="countdown">3</span> 秒后自动返回管理系统...</p>
+    <div class="badge">已成功托管: {{ACCOUNT_NAME}}</div>
+    <p>您的微信公众号已完成与本平台的授权对接，所有业务接口与菜单配置已自动就绪。<br>页面将在 <span id="countdown">3</span> 秒后自动返回系统工作台...</p>
     <button class="btn" onclick="goHome()">立即返回系统工作台</button>
   </div>
   <script>
     function goHome() {
-      // 尝试通知父窗口（如果是在弹窗中打开）
       try {
         if (window.opener && !window.opener.closed) {
-          window.opener.postMessage({ type: 'WECHAT_AUTH_SUCCESS', appid: '%s', name: '%s' }, '*');
+          window.opener.postMessage({ type: 'WECHAT_AUTH_SUCCESS', appid: '{{APPID}}', name: '{{ACCOUNT_NAME}}' }, '*');
         }
       } catch(e) {}
-      window.location.href = '/#auth_success=1&appid=%s';
+      window.location.href = '/#auth_success=1&appid={{APPID}}';
     }
     let sec = 3;
     const timer = setInterval(() => {
@@ -258,7 +262,10 @@ func (h *OpenComponentHandler) AuthCallback(c *gin.Context) {
     }, 1000);
   </script>
 </body>
-</html>`, accountName, accountName, appID, accountName, appID)
+</html>`
+
+	successHTML := strings.ReplaceAll(templateHTML, "{{ACCOUNT_NAME}}", accountName)
+	successHTML = strings.ReplaceAll(successHTML, "{{APPID}}", appID)
 
 	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(successHTML))
 }

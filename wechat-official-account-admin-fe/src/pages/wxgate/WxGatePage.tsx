@@ -22,6 +22,12 @@ import {
 import { toast } from 'sonner'
 
 export const WxGatePage: React.FC = () => {
+  // 提取纯域名供微信后台配置网页授权域名使用 (严禁带协议和端口)
+  const currentDomainOnly =
+    typeof window !== 'undefined'
+      ? window.location.hostname
+      : 'your-domain.com'
+
   const queryClient = useQueryClient()
   const { currentApp } = useAppStore()
 
@@ -162,6 +168,38 @@ export const WxGatePage: React.FC = () => {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3.5 text-xs">
+            {/* 微信 10003 域名配置指引提示条 */}
+            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-900 dark:text-amber-200 space-y-2">
+              <div className="flex items-center justify-between font-semibold">
+                <span className="flex items-center gap-1.5">
+                  <span className="inline-block h-2 w-2 rounded-full bg-amber-500"></span>
+                  <span>微信后台必须填写的【网页授权域名】(仅填网关域名一次即可):</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => copyText(currentDomainOnly, '授权域名')}
+                  className="text-primary hover:underline text-[11px] font-mono font-bold flex items-center gap-0.5"
+                >
+                  <Copy className="h-3 w-3" />
+                  <span>复制域名: {currentDomainOnly}</span>
+                </button>
+              </div>
+
+              <div className="text-[11px] text-muted-foreground leading-relaxed">
+                {currentApp?.account_type === 'authorized' ? (
+                  <span>
+                    👉 <strong>当前为第三方代管号</strong>：请前往 <strong>微信开放平台后台</strong> -&gt; 第三方平台详情 -&gt; <strong>开发配置</strong> -&gt; <strong>公众号开发域名</strong> 中填入上方的纯域名 <code>{currentDomainOnly}</code>。
+                  </span>
+                ) : (
+                  <span>
+                    👉 <strong>当前为普通直连号</strong>：请前往 <strong>微信公众平台后台</strong> -&gt; 设置与开发 -&gt; <strong>接口权限</strong> -&gt; 网页服务 -&gt; <strong>网页账号 (网页授权获取用户基本信息)</strong> -&gt; 点击修改填入上方的纯域名 <code>{currentDomainOnly}</code>。
+                  </span>
+                )}
+                <br />
+                <span className="text-destructive font-semibold">⚠️ 提示：若出现 10003 报错，99.9%% 是因为微信后台上述位置尚未填写该域名，或填了端口号/协议头！</span>
+              </div>
+            </div>
+
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="font-semibold text-foreground">目标业务系统实际回调地址 (redirect_uri):</label>

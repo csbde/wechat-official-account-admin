@@ -12,6 +12,7 @@ import (
 	"github.com/anchel/wechat-official-account-admin/config"
 	"github.com/anchel/wechat-official-account-admin/internal/database"
 	"github.com/anchel/wechat-official-account-admin/internal/model"
+	"github.com/anchel/wechat-official-account-admin/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/go-resty/resty/v2"
 )
@@ -70,15 +71,23 @@ func (h *OAuthHandler) HandleAuthorize(c *gin.Context) {
 	// 计算网关自己的回调地址
 	gatewayCallback := h.buildGatewayCallbackURL(c, sessionID)
 
-	// 构建前往微信官方授权页面的 URL
+	// 构建前往微信官方授权页面的 URL (支持普通公众号与第三方平台代管授权)
 	wechatAuthURL := fmt.Sprintf(
-		"https://open.weixin.qq.com/connect/oauth2/authorize?appid=%s&redirect_uri=%s&response_type=%s&scope=%s&state=%s#wechat_redirect",
+		"https://open.weixin.qq.com/connect/oauth2/authorize?appid=%s&redirect_uri=%s&response_type=%s&scope=%s&state=%s",
 		appID,
 		url.QueryEscape(gatewayCallback),
 		responseType,
 		scope,
 		sessionID,
 	)
+
+	// 若该公众号是由微信开放平台第三方代管授权接入，必须追加 component_appid 参数
+	// 否则微信会报错 10003 (redirect_uri域名与后台配置不一致)！
+	if account.AccountType == "authorized" && account.ComponentAppID != "" {
+		wechatAuthURL += "&component_appid=" + account.ComponentAppID
+	}
+
+	wechatAuthURL += "#wechat_redirect" 
 
 	GetMonitor().RecordCall(appID, "/oauth2/authorize", false)
 
@@ -128,12 +137,29 @@ func (h *OAuthHandler) HandleCallback(c *gin.Context) {
 }
 
 func (h *OAuthHandler) fetchUserInfo(ctx context.Context, account *model.WxAccount, code string) (*UserInfoSafe, error) {
-	// 1. 通过 code 换取 oauth access_token
-	tokenURL := fmt.Sprintf(
-		"https://api.weixin.qq.com/sns/oauth2/access_token?appid=%s&secret=%s&code=%s&grant_type=authorization_code",
-		account.AppID, account.AppSecret, code,
-	)
-	resp, err := h.http.R().SetContext(ctx).Get(tokenURL)
+	var resp *resty.Response
+	var err error
+
+	// 1. 区分直连公众号与微信开放平台第三方代管公众号换取 OAuth2 令牌
+	if account.AccountType == "authorized" && account.ComponentAppID != "" {
+		// 第三方平台代管模式: 必须调用 /sns/oauth2/component/access_token 接口
+		compToken, cErr := service.DefaultWxOpenService.GetComponentAccessToken(ctx, account.ComponentAppID)
+		if cErr != nil {
+			return nil, fmt.Errorf("获取 component_access_token 失败: %w", cErr)
+		}
+		tokenURL := fmt.Sprintf(
+			"https://api.weixin.qq.com/sns/oauth2/component/access_token?appid=%s&code=%s&grant_type=authorization_code&component_appid=%s&component_access_token=%s",
+			account.AppID, code, account.ComponentAppID, compToken,
+		)
+		resp, err = h.http.R().SetContext(ctx).Get(tokenURL)
+	} else {
+		// 普通直连模式: 调用原生 /sns/oauth2/access_token 接口
+		tokenURL := fmt.Sprintf(
+			"https://api.weixin.qq.com/sns/oauth2/access_token?appid=%s&secret=%s&code=%s&grant_type=authorization_code",
+			account.AppID, account.AppSecret, code,
+		)
+		resp, err = h.http.R().SetContext(ctx).Get(tokenURL)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -178,24 +204,37 @@ func (h *OAuthHandler) buildGatewayCallbackURL(c *gin.Context, sessionID string)
 		scheme = "https"
 	}
 	if proto := c.GetHeader("X-Forwarded-Proto"); proto != "" {
-		scheme = proto
+		scheme = strings.ToLower(proto)
 	}
 
-	host := config.GlobalConfig.Wechat.PublicHost
-	if host == "" {
+	rawHost := config.GlobalConfig.Wechat.PublicHost
+	if rawHost == "" {
 		if fwdHost := c.GetHeader("X-Forwarded-Host"); fwdHost != "" {
-			host = fwdHost
+			rawHost = fwdHost
 		} else {
-			host = c.Request.Host
+			rawHost = c.Request.Host
 		}
 	}
 
-	// 如果 public_host 自带了协议头 (如 https://wechat.company.com)
-	if strings.HasPrefix(host, "http://") || strings.HasPrefix(host, "https://") {
-		return fmt.Sprintf("%s/connect/oauth2/callback/%s", strings.TrimRight(host, "/"), sessionID)
+	// 如果配置自带了协议头 (如 https://wechat.company.com)
+	if strings.HasPrefix(rawHost, "http://") || strings.HasPrefix(rawHost, "https://") {
+		u, err := url.Parse(rawHost)
+		if err == nil {
+			scheme = u.Scheme
+			rawHost = u.Host
+		}
 	}
 
-	return fmt.Sprintf("%s://%s/connect/oauth2/callback/%s", scheme, host, sessionID)
+	// 微信官方对 10003 校验极其严苛：若为标准 80/443 端口，清洗掉端口
+	hostOnly := rawHost
+	if strings.Contains(hostOnly, ":") {
+		parts := strings.Split(hostOnly, ":")
+		if parts[1] == "80" || parts[1] == "443" {
+			hostOnly = parts[0]
+		}
+	}
+
+	return fmt.Sprintf("%s://%s/connect/oauth2/callback/%s", scheme, hostOnly, sessionID)
 }
 
 func (h *OAuthHandler) buildFinalRedirect(originalRedirect, code, state string, user *UserInfoSafe) string {
