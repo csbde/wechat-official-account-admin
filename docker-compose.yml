@@ -1,0 +1,66 @@
+version: "3.8"
+
+services:
+  woaa:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: woaa-server
+    restart: always
+    ports:
+      - "9305:9305"
+    environment:
+      - WOAA_SERVER_PORT=9305
+      - WOAA_SERVER_MODE=release
+      # 若使用内置 SQLite，无需修改下列 DB 配置；若启用 PostgreSQL，取消注释下面变量
+      - WOAA_DATABASE_TYPE=postgres
+      - WOAA_DATABASE_HOST=woaa-postgres
+      - WOAA_DATABASE_PORT=5432
+      - WOAA_DATABASE_USER=woaa
+      - WOAA_DATABASE_PASSWORD=woaa_secure_password
+      - WOAA_DATABASE_DBNAME=woaa
+      - WOAA_REDIS_ADDR=woaa-redis:6379
+      - WOAA_REDIS_PASSWORD=woaa_redis_password
+      - WOAA_JWT_SECRET=your-custom-super-secret-jwt-key
+    volumes:
+      - ./data:/app/data
+      - ./files:/app/files
+    depends_on:
+      woaa-postgres:
+        condition: service_healthy
+      woaa-redis:
+        condition: service_healthy
+
+  woaa-postgres:
+    image: postgres:16-alpine
+    container_name: woaa-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: woaa
+      POSTGRES_PASSWORD: woaa_secure_password
+      POSTGRES_DB: woaa
+      TZ: Asia/Shanghai
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U woaa -d woaa"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  woaa-redis:
+    image: redis:7-alpine
+    container_name: woaa-redis
+    restart: always
+    command: redis-server --requirepass woaa_redis_password --appendonly yes
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "woaa_redis_password", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
+  redisdata:
