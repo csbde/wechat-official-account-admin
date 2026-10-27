@@ -2,6 +2,7 @@ import { create } from 'zustand'
 
 export interface WxAccount {
   id: number
+  tenant_id: number
   name: string
   appid: string
   appsecret: string
@@ -9,6 +10,8 @@ export interface WxAccount {
   encoding_aes_key: string
   original_id?: string
   avatar_url?: string
+  account_type?: string // direct, authorized
+  component_appid?: string
   enabled: boolean
   is_default: boolean
   description?: string
