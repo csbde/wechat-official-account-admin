@@ -98,7 +98,7 @@ func RequestAudit() gin.HandlerFunc {
 					Method:       c.Request.Method,
 					Path:         path,
 					StatusCode:   c.Writer.Status(),
-					ClientIP:     c.ClientIP(),
+					ClientIP:     GetRealClientIP(c),
 					LatencyMs:    latency,
 					RequestBody:  requestBody,
 					ResponseBody: respBody,
@@ -230,4 +230,21 @@ func TenantAppID(required bool) gin.HandlerFunc {
 		c.Set("appid", appid)
 		c.Next()
 	}
+}
+
+// GetRealClientIP 提取经过反向代理后的真实客户端 IP
+func GetRealClientIP(c *gin.Context) string {
+	if cfIP := c.GetHeader("CF-Connecting-IP"); cfIP != "" {
+		return cfIP
+	}
+	if realIP := c.GetHeader("X-Real-IP"); realIP != "" {
+		return realIP
+	}
+	if fwd := c.GetHeader("X-Forwarded-For"); fwd != "" {
+		parts := strings.Split(fwd, ",")
+		if len(parts) > 0 && strings.TrimSpace(parts[0]) != "" {
+			return strings.TrimSpace(parts[0])
+		}
+	}
+	return c.ClientIP()
 }

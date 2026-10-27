@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { useAppStore } from '@/stores/app'
@@ -14,9 +14,10 @@ import {
   Trash2,
   Activity,
   Layers,
-  ExternalLink,
   Code2,
   CheckCircle2,
+  Laptop,
+  Compass,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -25,12 +26,19 @@ export const WxGatePage: React.FC = () => {
   const { currentApp } = useAppStore()
 
   // JSSDK 测试
-  const [testUrl, setTestUrl] = useState(window.location.href.split('#')[0])
+  const [testUrl, setTestUrl] = useState(
+    typeof window !== 'undefined' ? window.location.href.split('#')[0] : 'https://your-domain.com'
+  )
   const [jssdkResult, setJssdkResult] = useState<any>(null)
   const [loadingJSSDK, setLoadingJSSDK] = useState(false)
 
-  // OAuth2 链接生成
-  const [targetRedirect, setTargetRedirect] = useState('http://localhost:3000/callback')
+  // 目标业务系统实际回调地址 (自适应当前真实域名，不再生硬写死 localhost)
+  const initialRedirect =
+    typeof window !== 'undefined' && !window.location.hostname.includes('localhost')
+      ? `${window.location.origin}/oauth/callback`
+      : 'https://app.yourcompany.com/login/callback'
+
+  const [targetRedirect, setTargetRedirect] = useState(initialRedirect)
   const [authScope, setAuthScope] = useState('snsapi_userinfo')
 
   // 获取网关运行统计与监控
@@ -69,12 +77,13 @@ export const WxGatePage: React.FC = () => {
     toast.success(`已复制 ${label} 到剪贴板`)
   }
 
-  // 生成 OAuth2 授权中转链接
+  // 动态生成 OAuth2 授权中转链接 (自适应当前网关域名)
+  const gatewayBase = typeof window !== 'undefined' ? window.location.origin : 'https://your-gateway.com'
   const generatedOAuthURL = currentApp
-    ? `${window.location.origin}/connect/oauth2/authorize?appid=${currentApp.appid}&redirect_uri=${encodeURIComponent(
+    ? `${gatewayBase}/connect/oauth2/authorize?appid=${currentApp.appid}&redirect_uri=${encodeURIComponent(
         targetRedirect
       )}&response_type=code&scope=${authScope}&state=STATE#wechat_redirect`
-    : '请先在上方选择一个微信公众号'
+    : '请先在顶部选择一个微信公众号'
 
   return (
     <div className="space-y-6">
@@ -139,7 +148,7 @@ export const WxGatePage: React.FC = () => {
         </Card>
       </div>
 
-      {/* 功能区块：场景一（OAuth2 突破域名限制） 与 场景二（JSSDK 一站式配置） */}
+      {/* 功能区块：场景一 与 场景二 */}
       <div className="grid gap-6 lg:grid-cols-2">
         {/* 场景一：微信网页授权登录代理 */}
         <Card>
@@ -153,14 +162,47 @@ export const WxGatePage: React.FC = () => {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3.5 text-xs">
-            <div className="space-y-1">
-              <label className="font-semibold text-foreground">目标业务系统实际回调地址 (redirect_uri):</label>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="font-semibold text-foreground">目标业务系统实际回调地址 (redirect_uri):</label>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setTargetRedirect(`${window.location.origin}/oauth/callback`)}
+                    className="text-[11px] text-primary hover:underline flex items-center gap-0.5"
+                  >
+                    <Compass className="h-3 w-3" />
+                    <span>当前站点</span>
+                  </button>
+                  <span className="text-muted-foreground/40">|</span>
+                  <button
+                    type="button"
+                    onClick={() => setTargetRedirect('https://app.yourcompany.com/login/callback')}
+                    className="text-[11px] text-primary hover:underline"
+                  >
+                    子域名系统
+                  </button>
+                  <span className="text-muted-foreground/40">|</span>
+                  <button
+                    type="button"
+                    onClick={() => setTargetRedirect('http://localhost:3000/callback')}
+                    className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-0.5"
+                  >
+                    <Laptop className="h-3 w-3" />
+                    <span>本地联调</span>
+                  </button>
+                </div>
+              </div>
+
               <Input
                 value={targetRedirect}
                 onChange={(e) => setTargetRedirect(e.target.value)}
-                placeholder="例如: https://sub.yourcompany.com/callback 或 http://localhost:3000/login"
+                placeholder="例如: https://sub.yourcompany.com/callback 或 http://localhost:3000/callback"
                 className="font-mono text-xs"
               />
+              <p className="text-[11px] text-muted-foreground">
+                说明：此地址是您自己的具体业务系统接收登录回调的 URL。网关会在此 URL 后面自动拼接 <code>code</code>、<code>state</code> 与脱敏用户信息 <code>user_info</code>。
+              </p>
             </div>
 
             <div className="space-y-1">
@@ -214,7 +256,7 @@ export const WxGatePage: React.FC = () => {
           </CardContent>
         </Card>
 
-        {/* 场景二：前端极速 JSSDK 签名与脚本代理 */}
+        {/* 场景二：前端极速 JSSDK 签名与分享 */}
         <Card>
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">

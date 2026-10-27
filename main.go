@@ -124,13 +124,14 @@ func startServer() {
 	// 9. 构建路由与中间件
 	r := router.SetupRouter(&frontendFS)
 
+	listenAddr := cfg.Server.GetListenAddr()
 	srv := &http.Server{
-		Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
+		Addr:    listenAddr,
 		Handler: r,
 	}
 
 	go func() {
-		logger.Info(fmt.Sprintf("Server is listening on :%d (Database: %s)", cfg.Server.Port, db.Dialector.Name()))
+		logger.Info(fmt.Sprintf("Server is listening on %s (Database: %s)", listenAddr, db.Dialector.Name()))
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("Server start failed", zap.Error(err))
 			os.Exit(1)

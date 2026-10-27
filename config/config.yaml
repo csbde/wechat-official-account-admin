@@ -5,6 +5,17 @@ server:
     - "*"
   static_dir: "./files"
 
+  # 信任的上级反向代理 IP 或网段 (Nginx / Caddy / Cloudflare / K8s Ingress)
+  # 放在反向代理后面时必须信任上级代理，否则客户端真实 IP 会被误判为本地 127.0.0.1
+  # 可配置为具体的代理 IP，或者网段，或 ["0.0.0.0/0"] 信任全部上级代理
+  trusted_proxies:
+    - "127.0.0.1"
+    - "::1"
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
+    - "0.0.0.0/0"
+
 database:
   type: sqlite
   sqlite_path: "./data/woaa.db"
@@ -31,21 +42,21 @@ jwt:
   expire_hours: 72
   issuer: woaa-admin
 
-# OIDC 单点登录配置 (支持 Keycloak / Authing / Okta / Google / CAS / 自建 OIDC 服务)
+# OIDC 单点登录配置 (支持 Keycloak / Authing / Okta / Google / CAS 等)
 # 默认按照用户的 email 进行自动匹配与绑定
 oidc:
   enabled: true
   issuer: "" # 例如 https://auth.example.com
   client_id: "woaa_client"
   client_secret: "woaa_secret_123"
-  redirect_uri: "" # 留空时自动取当前 host/api/auth/oidc/callback
+  redirect_uri: ""
   scopes:
     - openid
     - profile
     - email
 
 wechat:
-  public_host: ""
+  public_host: "" # 生产反向代理时若配置了域名，可在此指定 (如 wechat.company.com)
   proxy: ""
 
 telemetry:

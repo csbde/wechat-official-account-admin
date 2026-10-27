@@ -174,16 +174,25 @@ func (h *OAuthHandler) fetchUserInfo(ctx context.Context, account *model.WxAccou
 
 func (h *OAuthHandler) buildGatewayCallbackURL(c *gin.Context, sessionID string) string {
 	scheme := "http"
-	if c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https" {
+	if c.Request.TLS != nil {
 		scheme = "https"
+	}
+	if proto := c.GetHeader("X-Forwarded-Proto"); proto != "" {
+		scheme = proto
 	}
 
 	host := config.GlobalConfig.Wechat.PublicHost
 	if host == "" {
-		host = c.GetHeader("X-Forwarded-Host")
-		if host == "" {
+		if fwdHost := c.GetHeader("X-Forwarded-Host"); fwdHost != "" {
+			host = fwdHost
+		} else {
 			host = c.Request.Host
 		}
+	}
+
+	// 如果 public_host 自带了协议头 (如 https://wechat.company.com)
+	if strings.HasPrefix(host, "http://") || strings.HasPrefix(host, "https://") {
+		return fmt.Sprintf("%s/connect/oauth2/callback/%s", strings.TrimRight(host, "/"), sessionID)
 	}
 
 	return fmt.Sprintf("%s://%s/connect/oauth2/callback/%s", scheme, host, sessionID)

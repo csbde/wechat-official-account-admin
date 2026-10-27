@@ -354,7 +354,10 @@ server {
 
 | YAML 配置路径 | 对应环境变量 | 默认值 | 说明 |
 | :--- | :--- | :--- | :--- |
+| `server.host` | `WOAA_SERVER_HOST` | `0.0.0.0` | 监听主机/IP (支持指定 127.0.0.1 仅本地、内网具体网卡IP、或 0.0.0.0) |
 | `server.port` | `WOAA_SERVER_PORT` | `9305` | 服务监听端口 |
+| `server.listen_addr` | `WOAA_SERVER_LISTEN_ADDR` | 空 | 完整监听地址 (设置时优先于 HOST+PORT，例如: 127.0.0.1:9305) |
+| `server.trusted_proxies` | `WOAA_SERVER_TRUSTED_PROXIES` | 常见内网段+回环 | 信任的上级反向代理列表 (Nginx/Cloudflare)，反代场景必须信任以防IP被误判为127.0.0.1 |
 | `server.mode` | `WOAA_SERVER_MODE` | `debug` | 运行模式 (`debug` / `release`) |
 | `database.type` | `WOAA_DATABASE_TYPE` | `sqlite` | 数据库类型 (`sqlite` 或 `postgres`) |
 | `database.sqlite_path` | `WOAA_DATABASE_SQLITE_PATH` | `./data/woaa.db` | SQLite 数据文件持久化路径 |

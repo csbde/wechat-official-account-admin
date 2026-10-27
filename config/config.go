@@ -1,8 +1,14 @@
 package config
 
 import (
+	"fmt"
+	"net"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 
+	"github.com/joho/godotenv"
 	"github.com/spf13/viper"
 )
 
@@ -18,10 +24,27 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Port         int      `mapstructure:"port"`
-	Mode         string   `mapstructure:"mode"`
-	AllowOrigins []string `mapstructure:"allow_origins"`
-	StaticDir    string   `mapstructure:"static_dir"`
+	Host           string   `mapstructure:"host"`           // 监听主机/IP: 0.0.0.0, 127.0.0.1, 或指定具体网卡IP
+	Port           int      `mapstructure:"port"`           // 监听端口: 9305
+	ListenAddr     string   `mapstructure:"listen_addr"`    // 完整的监听地址，若设置则优先于 host+port，如 127.0.0.1:9305
+	Mode           string   `mapstructure:"mode"`           // debug, release
+	AllowOrigins   []string `mapstructure:"allow_origins"`
+	StaticDir      string   `mapstructure:"static_dir"`
+	TrustedProxies []string `mapstructure:"trusted_proxies"` // 信任的上级反向代理 IP 或网段 (Nginx / Cloudflare 等)
+}
+
+func (s *ServerConfig) GetListenAddr() string {
+	if s.ListenAddr != "" {
+		return s.ListenAddr
+	}
+	host := strings.TrimSpace(s.Host)
+	if host == "localhost" {
+		host = "127.0.0.1"
+	}
+	if host == "" {
+		host = "0.0.0.0"
+	}
+	return net.JoinHostPort(host, strconv.Itoa(s.Port))
 }
 
 type DatabaseConfig struct {
@@ -56,11 +79,11 @@ type JWTConfig struct {
 
 type OIDCConfig struct {
 	Enabled      bool     `mapstructure:"enabled"`
-	Issuer       string   `mapstructure:"issuer"` // e.g. https://auth.company.com/realms/master
+	Issuer       string   `mapstructure:"issuer"`
 	ClientID     string   `mapstructure:"client_id"`
 	ClientSecret string   `mapstructure:"client_secret"`
-	RedirectURI  string   `mapstructure:"redirect_uri"` // e.g. http://localhost:9305/api/auth/oidc/callback
-	Scopes       []string `mapstructure:"scopes"`       // openid, profile, email
+	RedirectURI  string   `mapstructure:"redirect_uri"`
+	Scopes       []string `mapstructure:"scopes"`
 }
 
 type WechatConfig struct {
@@ -77,6 +100,9 @@ type TelemetryConfig struct {
 var GlobalConfig Config
 
 func Load(configPath string) (*Config, error) {
+	// 1. 自动读取并加载 .env 文件
+	loadDotEnv()
+
 	v := viper.New()
 	v.SetConfigType("yaml")
 	if configPath != "" {
@@ -91,11 +117,22 @@ func Load(configPath string) (*Config, error) {
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
 
-	// 默认值
+	// 默认配置
+	v.SetDefault("server.host", "0.0.0.0")
 	v.SetDefault("server.port", 9305)
+	v.SetDefault("server.listen_addr", "")
 	v.SetDefault("server.mode", "debug")
 	v.SetDefault("server.allow_origins", []string{"*"})
 	v.SetDefault("server.static_dir", "./files")
+	// 默认信任常见局域网与回环，支持 ["0.0.0.0/0"] 信任全部反代
+	v.SetDefault("server.trusted_proxies", []string{
+		"127.0.0.1",
+		"::1",
+		"10.0.0.0/8",
+		"172.16.0.0/12",
+		"192.168.0.0/16",
+		"0.0.0.0/0",
+	})
 
 	v.SetDefault("database.type", "sqlite")
 	v.SetDefault("database.sqlite_path", "./data/woaa.db")
@@ -140,5 +177,50 @@ func Load(configPath string) (*Config, error) {
 		return nil, err
 	}
 
+	// 兼容处理老版本或 .env 中的传统环境变量
+	if listenAddr := os.Getenv("LISTEN_ADDR"); listenAddr != "" {
+		GlobalConfig.Server.ListenAddr = listenAddr
+		parts := strings.Split(listenAddr, ":")
+		if len(parts) == 2 {
+			GlobalConfig.Server.Host = parts[0]
+			if p, err := strconv.Atoi(parts[1]); err == nil && p > 0 {
+				GlobalConfig.Server.Port = p
+			}
+		}
+	}
+	if host := os.Getenv("HOST"); host != "" {
+		GlobalConfig.Server.Host = host
+	}
+	if portStr := os.Getenv("PORT"); portStr != "" {
+		if p, err := strconv.Atoi(portStr); err == nil && p > 0 {
+			GlobalConfig.Server.Port = p
+		}
+	}
+	if redisAddr := os.Getenv("REDIS_ADDR"); redisAddr != "" {
+		GlobalConfig.Redis.Addr = redisAddr
+	}
+	if redisPass := os.Getenv("REDIS_PASSWORD"); redisPass != "" {
+		GlobalConfig.Redis.Password = redisPass
+	}
+	if pubHost := os.Getenv("PUBLIC_HOST"); pubHost != "" {
+		GlobalConfig.Wechat.PublicHost = pubHost
+	}
+
 	return &GlobalConfig, nil
+}
+
+func loadDotEnv() {
+	envFiles := []string{
+		".env",
+		".env.local",
+		filepath.Join(".", ".env"),
+	}
+
+	for _, file := range envFiles {
+		if fi, err := os.Stat(file); err == nil && !fi.IsDir() {
+			_ = godotenv.Load(file)
+			fmt.Printf("[CONFIG] 自动检测并加载环境变量文件: %s\n", file)
+			break
+		}
+	}
 }

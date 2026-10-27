@@ -24,6 +24,11 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 
 	r := gin.New()
 
+	// 设置信任的上级反向代理列表，确保正确提取真实 Client IP 与反代头
+	if len(cfg.Server.TrustedProxies) > 0 {
+		_ = r.SetTrustedProxies(cfg.Server.TrustedProxies)
+	}
+
 	// 基础中间件
 	r.Use(gin.Recovery())
 	r.Use(middleware.CORS())

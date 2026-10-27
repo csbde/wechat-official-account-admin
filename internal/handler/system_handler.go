@@ -162,17 +162,91 @@ func (h *SystemHandler) DeleteUser(c *gin.Context) {
 	Ok(c, gin.H{"id": id, "deleted": true})
 }
 
-// PublicIP 获取服务器公网出口 IP
+// PublicIP 获取服务器公网出口 IP (多源并发探测 + 反向代理智能识别)
 func (h *SystemHandler) PublicIP(c *gin.Context) {
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get("https://api.ipify.org")
-	if err != nil {
-		Ok(c, gin.H{"ip": "127.0.0.1"})
+	cfg := &config.GlobalConfig
+
+	// 1. 若配置了自定义公网域名或IP
+	if cfg.Wechat.PublicHost != "" && !strings.Contains(cfg.Wechat.PublicHost, "127.0.0.1") && !strings.Contains(cfg.Wechat.PublicHost, "localhost") {
+		Ok(c, gin.H{"ip": cfg.Wechat.PublicHost, "source": "config"})
 		return
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	Ok(c, gin.H{"ip": strings.TrimSpace(string(body))})
+
+	// 2. 多源并发竞速探测服务器出网公网 IP
+	providers := []string{
+		"https://api.ipify.org",
+		"https://icanhazip.com",
+		"https://ip.sb",
+		"https://checkip.amazonaws.com",
+		"http://cip.cc",
+	}
+
+	type ipResult struct {
+		ip  string
+		src string
+	}
+	resChan := make(chan ipResult, len(providers))
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
+	defer cancel()
+
+	for _, pURL := range providers {
+		go func(target string) {
+			req, err := http.NewRequestWithContext(ctx, "GET", target, nil)
+			if err != nil {
+				return
+			}
+			req.Header.Set("User-Agent", "curl/8.5.0")
+			cli := &http.Client{Timeout: 2500 * time.Millisecond}
+			resp, err := cli.Do(req)
+			if err != nil {
+				return
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode == 200 {
+				body, _ := io.ReadAll(resp.Body)
+				cleanIP := strings.TrimSpace(string(body))
+				// 提取有效 IP 地址字符串 (去除换行或多余文字)
+				fields := strings.Fields(cleanIP)
+				if len(fields) > 0 {
+					ipCandidate := fields[0]
+					if strings.Contains(ipCandidate, "IP") && len(fields) > 2 {
+						ipCandidate = fields[2]
+					}
+					ipCandidate = strings.Trim(ipCandidate, " :\t\r\n")
+					if len(ipCandidate) >= 7 && len(ipCandidate) <= 45 && !strings.HasPrefix(ipCandidate, "127.") {
+						resChan <- ipResult{ip: ipCandidate, src: target}
+					}
+				}
+			}
+		}(pURL)
+	}
+
+	select {
+	case found := <-resChan:
+		Ok(c, gin.H{"ip": found.ip, "source": found.src})
+		return
+	case <-time.After(2800 * time.Millisecond):
+		// 超时未探测到
+	}
+
+	// 3. 回退策略：检查反向代理头中携带的真实客户端/来源 IP
+	clientRealIP := ""
+	if cf := c.GetHeader("CF-Connecting-IP"); cf != "" {
+		clientRealIP = cf
+	} else if xr := c.GetHeader("X-Real-IP"); xr != "" {
+		clientRealIP = xr
+	} else if xf := c.GetHeader("X-Forwarded-For"); xf != "" {
+		clientRealIP = strings.TrimSpace(strings.Split(xf, ",")[0])
+	} else {
+		clientRealIP = c.ClientIP()
+	}
+
+	if clientRealIP != "" && !strings.HasPrefix(clientRealIP, "127.") && clientRealIP != "::1" {
+		Ok(c, gin.H{"ip": clientRealIP, "source": "proxy_header"})
+		return
+	}
+
+	Ok(c, gin.H{"ip": "127.0.0.1", "source": "fallback"})
 }
 
 type ComponentHealth struct {

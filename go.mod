@@ -7,10 +7,12 @@ require (
 	github.com/casbin/gorm-adapter/v3 v3.32.0
 	github.com/gin-contrib/sessions v1.0.1
 	github.com/gin-gonic/gin v1.10.0
+	github.com/glebarez/sqlite v1.11.0
 	github.com/go-resty/resty/v2 v2.15.3
 	github.com/golang-jwt/jwt/v5 v5.2.1
 	github.com/google/uuid v1.6.0
 	github.com/hibiken/asynq v0.24.1
+	github.com/joho/godotenv v1.5.1
 	github.com/redis/go-redis/v9 v9.6.2
 	github.com/samber/lo v1.46.0
 	github.com/spf13/cobra v1.8.1
@@ -37,7 +39,6 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fsnotify/fsnotify v1.7.0 // indirect
 	github.com/glebarez/go-sqlite v1.21.2 // indirect
-	github.com/glebarez/sqlite v1.11.0 // indirect
 	github.com/go-logr/logr v1.4.2 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-openapi/jsonpointer v0.19.5 // indirect
