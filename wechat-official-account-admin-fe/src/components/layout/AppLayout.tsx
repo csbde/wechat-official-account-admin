@@ -16,6 +16,7 @@ import {
   Plus,
   Radio,
   ShieldAlert,
+  Zap,
 } from 'lucide-react'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore, WxAccount } from '@/stores/app'
@@ -43,7 +44,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentTab, onTabChange, c
   const { currentApp, setCurrentApp, theme, toggleTheme } = useAppStore()
 
   // 获取所有公众号列表
-  const { data: accounts, refetch: refetchAccounts } = useQuery<WxAccount[]>({
+  const { data: accounts } = useQuery<WxAccount[]>({
     queryKey: ['accounts'],
     queryFn: () => api.get('/api/accounts'),
   })
@@ -58,7 +59,8 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentTab, onTabChange, c
 
   const navItems = [
     { id: 'dashboard', label: '工作台概览', icon: LayoutDashboard },
-    { id: 'accounts', label: '公众号管理', icon: Smartphone },
+    { id: 'accounts', label: '公众号与开放平台', icon: Smartphone },
+    { id: 'wxgate', label: '微信网关 (WXGate)', icon: Zap },
     { id: 'menu', label: '自定义菜单', icon: MenuSquare, requiresApp: true },
     { id: 'materials', label: '素材多媒体', icon: ImageIcon, requiresApp: true },
     { id: 'autoreply', label: '智能自动回复', icon: MessageSquareReply, requiresApp: true },
@@ -82,7 +84,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentTab, onTabChange, c
               <span>WOAA Admin</span>
               <span className="text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded bg-primary/10 text-primary">v2.0</span>
             </div>
-            <div className="text-xs text-muted-foreground">微信公众号管理平台</div>
+            <div className="text-xs text-muted-foreground">微信综合运营与网关平台</div>
           </div>
         </div>
 
@@ -120,9 +122,9 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentTab, onTabChange, c
         <div className="p-4 border-t border-border/60 text-xs text-muted-foreground flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span>API 服务正常</span>
+            <span>API & 网关运行中</span>
           </div>
-          <span className="text-[11px] font-mono text-muted-foreground/80">Go + React</span>
+          <span className="text-[11px] font-mono text-muted-foreground/80">Go + WXGate</span>
         </div>
       </aside>
 
@@ -203,7 +205,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentTab, onTabChange, c
                   </div>
                   <div className="text-left hidden sm:block">
                     <div className="text-xs font-medium leading-none">{user?.nickname || user?.username}</div>
-                    <div className="text-[10px] text-muted-foreground capitalize leading-tight mt-0.5">{user?.role} · {tenant?.name || "默认组织"}</div>
+                    <div className="text-[10px] text-muted-foreground capitalize leading-tight mt-0.5">{user?.role} · {tenant?.name || '默认组织'}</div>
                   </div>
                   <ChevronDown className="h-3 w-3 opacity-50" />
                 </Button>

@@ -11,6 +11,7 @@ import (
 	"github.com/anchel/wechat-official-account-admin/config"
 	"github.com/anchel/wechat-official-account-admin/internal/handler"
 	"github.com/anchel/wechat-official-account-admin/internal/middleware"
+	"github.com/anchel/wechat-official-account-admin/internal/wxgate"
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
@@ -36,7 +37,9 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 	// Swagger API 文档
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
+	// ==========================================
 	// 1. 微信普通公众号回调网关 (微信直连，无需 JWT)
+	// ==========================================
 	gatewayHandler := &handler.GatewayHandler{}
 	wxmp := r.Group("/wxmp")
 	{
@@ -44,7 +47,9 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 		wxmp.POST("/:appid/handler", gatewayHandler.ReceiveMessage)
 	}
 
+	// ==========================================
 	// 2. 微信开放平台-第三方平台网关 (微信直连，无需 JWT)
+	// ==========================================
 	openHandler := &handler.OpenComponentHandler{}
 	openGate := r.Group("/open")
 	{
@@ -54,7 +59,56 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 		openGate.POST("/component/:appid/callback", openHandler.ReceiveAppMsgCallback)
 	}
 
-	// 3. 业务 RESTful API 分组
+	// ==========================================
+	// 3. WXGate 核心网关功能 (高并发凭证中心、突破单域名限制中转、JSSDK 签名)
+	// ==========================================
+	gateProxy := wxgate.NewProxyHandler()
+	gateOAuth := wxgate.NewOAuthHandler()
+	gateJSSDK := wxgate.NewJSSDKHandler()
+
+	// 3.1 微信 OAuth2 网页授权中转代理 (突破单一授权回调域名限制，自动回传脱敏用户信息)
+	connectGroup := r.Group("/connect/oauth2")
+	{
+		connectGroup.GET("/authorize", gateOAuth.HandleAuthorize)
+		connectGroup.POST("/authorize", gateOAuth.HandleAuthorize)
+		connectGroup.GET("/callback/:session_id", gateOAuth.HandleCallback)
+		connectGroup.GET("/callback", gateOAuth.HandleCallback)
+	}
+	compatAuth := r.Group("/wechat/auth")
+	{
+		compatAuth.GET("/authorize", gateOAuth.HandleAuthorize)
+		compatAuth.POST("/authorize", gateOAuth.HandleAuthorize)
+		compatAuth.GET("/callback/:session_id", gateOAuth.HandleCallback)
+		compatAuth.GET("/callback", gateOAuth.HandleCallback)
+	}
+
+	// 3.2 JSSDK 网页签名配置接口与静态脚本代理
+	r.GET("/api/jssdk/config", gateJSSDK.HandleGetConfig)
+	r.POST("/api/jssdk/config", gateJSSDK.HandleGetConfig)
+	r.GET("/jssdk/config", gateJSSDK.HandleGetConfig)
+	r.POST("/jssdk/config", gateJSSDK.HandleGetConfig)
+	r.GET("/jweixin.js", gateJSSDK.HandleJSSDKScript)
+	r.GET("/jweixin-1.6.0.js", gateJSSDK.HandleJSSDKScript)
+
+	// 3.3 微信全局 Token 与 Ticket 原生接口代理 (两级缓存 + 防穿透单飞合并，彻底告别Token冲刷互踢)
+	cgiGroup := r.Group("/cgi-bin")
+	{
+		cgiGroup.GET("/token", gateProxy.HandleTokenRequest)
+		cgiGroup.POST("/token", gateProxy.HandleTokenRequest)
+		cgiGroup.POST("/stable_token", gateProxy.HandleStableTokenRequest)
+		cgiGroup.GET("/ticket/getticket", gateJSSDK.HandleGetTicket)
+		cgiGroup.POST("/ticket/getticket", gateJSSDK.HandleGetTicket)
+	}
+
+	// 3.4 微信 sns 接口透明转发
+	snsGroup := r.Group("/sns")
+	{
+		snsGroup.Any("/*any", gateProxy.HandleGenericProxy)
+	}
+
+	// ==========================================
+	// 4. 业务 RESTful API 分组
+	// ==========================================
 	api := r.Group("/api")
 
 	authHandler := &handler.AuthHandler{}
@@ -68,6 +122,10 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 	}
 	api.GET("/system/public-ip", systemHandler.PublicIP)
 	api.GET("/system/health", systemHandler.HealthCheck)
+
+	// WXGate 网关监控与缓存管理
+	api.GET("/wxgate/stats", gateProxy.GetGateStats)
+	api.DELETE("/wxgate/cache/:app_id", gateProxy.ClearAppCache)
 
 	// 受保护的 API 接口 (需 JWT + Casbin 鉴权，支持多租户隔离)
 	protected := api.Group("")
@@ -156,7 +214,7 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 			r.NoRoute(func(c *gin.Context) {
 				path := strings.TrimPrefix(c.Request.URL.Path, "/")
 
-				if strings.HasPrefix(path, "api/") || strings.HasPrefix(path, "wxmp/") || strings.HasPrefix(path, "open/") || strings.HasPrefix(path, "swagger/") {
+				if strings.HasPrefix(path, "api/") || strings.HasPrefix(path, "wxmp/") || strings.HasPrefix(path, "open/") || strings.HasPrefix(path, "connect/") || strings.HasPrefix(path, "cgi-bin/") || strings.HasPrefix(path, "swagger/") {
 					c.JSON(http.StatusNotFound, gin.H{"code": 404, "message": "API not found"})
 					return
 				}

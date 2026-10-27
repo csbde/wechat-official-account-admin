@@ -93,6 +93,62 @@
 
 ---
 
+
+---
+
+## ⚡ 微信认证与接口代理网关 (WXGate 功能集成)
+
+本项目已深度融合 **WXGate** 的高并发凭证中心与授权网关能力，解决中大型团队多系统协同开发时的四大核心痛点：
+
+### 1. 统一凭证中心（彻底告别 Token 互相踢下线与限频）
+- **痛点**：多个子系统、不同业务线各自分别调用微信获取 `access_token` 或 `jsapi_ticket`，会导致旧 Token 被新 Token 覆盖失效，频繁出现“Token invalid”报警。
+- **网关解决方案**：
+  - 子系统只需将原本请求微信的域名改为本网关地址：
+    - `GET/POST /cgi-bin/token?grant_type=client_credential&appid=APPID&secret=SECRET`
+    - `POST /cgi-bin/stable_token`
+    - `GET/POST /cgi-bin/ticket/getticket?access_token=TOKEN&type=jsapi`
+  - **L1 本地内存读写锁 + L2 Redis 双级缓存**，自动提前 300 秒续期。
+  - **SingleFlight 单飞并发防击穿合并锁**：万级高并发下同时失效时，仅向微信官方发起 1 次网络换取，其他请求共享结果，从容承载极高并发。
+
+### 2. 突破微信单一授权回调域名限制（OAuth2 代理中转）
+- **痛点**：微信公众号后台仅允许配置 1~2 个授权回调域名。多个不同子域名、测试环境、本地 `localhost` 无法完成微信授权登录。
+- **网关解决方案**：
+  - 只有本网关的域名需要在微信后台配置一次；
+  - 任意业务系统或前端直接发起跳转网关：
+    ```
+    https://<你的网关域名>/connect/oauth2/authorize?appid=YOUR_APPID&redirect_uri=https://any-domain.com/callback&scope=snsapi_userinfo&state=STATE#wechat_redirect
+    ```
+  - **自动脱敏回传 `user_info`**：授权成功后，网关在服务端自动替业务端换取 Token 并拉取脱敏后的用户信息 `user_info`（包含 `openid`, `nickname`, `headimgurl`, `sex` 等），直接附带在 URL Query 重定向回业务原本的 `redirect_uri`，业务端无需再走二次换 Token 流程！
+
+### 3. 前端极速 JSSDK 签名与脚本代理
+- **一行配置，前端 2 分钟搞定微信分享**：
+  ```html
+  <!-- 1. 引入网关加速代理的 JSSDK -->
+  <script src="https://<你的网关域名>/jweixin.js"></script>
+
+  <script>
+  async function initShare() {
+    // 2. 向网关获取动态签名 (网关自动调度全局 token 和 ticket)
+    const currentUrl = encodeURIComponent(window.location.href.split("#")[0]);
+    const res = await fetch(`https://<你的网关域名>/api/jssdk/config?url=${currentUrl}`);
+    const { data } = await res.json();
+
+    // 3. 注入配置
+    wx.config({
+      appId: data.appId,
+      timestamp: data.timestamp,
+      nonceStr: data.nonceStr,
+      signature: data.signature,
+      jsApiList: data.jsApiList
+    });
+  }
+  initShare();
+  </script>
+  ```
+- **网关管理监控与一键清理**：
+  - 查看监控与缓存统计：`GET /api/wxgate/stats`
+  - 彻底清空指定应用凭证缓存：`DELETE /api/wxgate/cache/:app_id`
+
 ## 🚀 系统初始化与默认凭据
 
 平台启动时，系统将自动执行自检与初始化流程：

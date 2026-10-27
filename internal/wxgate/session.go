@@ -1,0 +1,110 @@
+package wxgate
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+		"sync"
+	"time"
+)
+
+type SessionData struct {
+	AppID               string    `json:"app_id"`
+	OriginalRedirectURI string    `json:"original_redirect_uri"`
+	OriginalState       string    `json:"original_state"`
+	Scope               string    `json:"scope"`
+	UserIP              string    `json:"user_ip"`
+	CreatedAt           time.Time `json:"created_at"`
+}
+
+type GateSessionManager struct {
+	sessions map[string]*SessionData
+	mutex    sync.RWMutex
+}
+
+var (
+	defaultSessionManager *GateSessionManager
+	sessionOnce           sync.Once
+)
+
+func GetSessionManager() *GateSessionManager {
+	sessionOnce.Do(func() {
+		sm := &GateSessionManager{
+			sessions: make(map[string]*SessionData),
+		}
+		go sm.cleanupExpired()
+		defaultSessionManager = sm
+	})
+	return defaultSessionManager
+}
+
+func (sm *GateSessionManager) CreateSession(appID, originalRedirectURI, originalState, scope, userIP string) (string, error) {
+	bytes := make([]byte, 16)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	sessionID := hex.EncodeToString(bytes)
+
+	now := time.Now()
+	data := &SessionData{
+		AppID:               appID,
+		OriginalRedirectURI: originalRedirectURI,
+		OriginalState:       originalState,
+		Scope:               scope,
+		UserIP:              userIP,
+		CreatedAt:           now,
+	}
+
+	sm.mutex.Lock()
+	sm.sessions[sessionID] = data
+	sm.mutex.Unlock()
+
+	return sessionID, nil
+}
+
+func (sm *GateSessionManager) GetSession(sessionID string) (*SessionData, bool) {
+	sm.mutex.RLock()
+	defer sm.mutex.RUnlock()
+
+	session, exists := sm.sessions[sessionID]
+	if !exists {
+		return nil, false
+	}
+
+	// 24小时有效
+	if time.Since(session.CreatedAt) > 24*time.Hour {
+		go sm.DeleteSession(sessionID)
+		return nil, false
+	}
+
+	return session, true
+}
+
+func (sm *GateSessionManager) DeleteSession(sessionID string) {
+	sm.mutex.Lock()
+	delete(sm.sessions, sessionID)
+	sm.mutex.Unlock()
+}
+
+func (sm *GateSessionManager) cleanupExpired() {
+	ticker := time.NewTicker(30 * time.Minute)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		sm.mutex.Lock()
+		now := time.Now()
+		for id, s := range sm.sessions {
+			if now.Sub(s.CreatedAt) > 24*time.Hour {
+				delete(sm.sessions, id)
+			}
+		}
+		sm.mutex.Unlock()
+	}
+}
+
+func (sm *GateSessionManager) GetStats() map[string]interface{} {
+	sm.mutex.RLock()
+	defer sm.mutex.RUnlock()
+	return map[string]interface{}{
+		"active_sessions": len(sm.sessions),
+	}
+}
