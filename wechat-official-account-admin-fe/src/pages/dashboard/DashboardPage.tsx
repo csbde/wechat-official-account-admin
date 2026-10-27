@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
   Smartphone,
+  AppWindow,
   Users,
   Image as ImageIcon,
   Activity,
@@ -83,6 +84,14 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigate }) => {
             >
               <Smartphone className="h-4 w-4 mr-1.5" />
               管理微信公众号
+            </Button>
+            <Button
+              onClick={() => onNavigate('miniprogram')}
+              variant="outline"
+              className="border-white/40 text-white bg-white/10 hover:bg-white/20 font-medium"
+            >
+              <AppWindow className="h-4 w-4 mr-1.5 text-amber-300" />
+              微信小程序快速注册
             </Button>
             <Button
               onClick={() => onNavigate('wxgate')}

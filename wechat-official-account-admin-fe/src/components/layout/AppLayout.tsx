@@ -61,6 +61,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({ currentTab, onTabChange, c
   const navItems = [
     { id: 'dashboard', label: '工作台概览', icon: LayoutDashboard },
     { id: 'accounts', label: '公众号与开放平台', icon: Smartphone },
+    { id: 'miniprogram', label: '微信小程序', icon: AppWindow },
     { id: 'wxgate', label: '微信网关 (WXGate)', icon: Zap },
     { id: 'menu', label: '自定义菜单', icon: MenuSquare, requiresApp: true },
     { id: 'materials', label: '素材多媒体', icon: ImageIcon, requiresApp: true },
