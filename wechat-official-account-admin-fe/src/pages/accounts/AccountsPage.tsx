@@ -45,6 +45,15 @@ const accountSchema = z.object({
 type AccountFormData = z.infer<typeof accountSchema>
 
 export const AccountsPage: React.FC = () => {
+  // 协议自适应保障：如果当前站点是 https，自动规范输出为 https 协议
+  const formatSecureURL = (rawUrl?: string) => {
+    if (!rawUrl) return ""
+    if (typeof window !== "undefined" && window.location.protocol === "https:" && rawUrl.startsWith("http:")) {
+      return rawUrl.replace(/^http:/, "https:")
+    }
+    return rawUrl
+  }
+
   const queryClient = useQueryClient()
   const { currentApp, setCurrentApp } = useAppStore()
   const { user } = useAuthStore()
@@ -303,7 +312,7 @@ export const AccountsPage: React.FC = () => {
                       <span>{isAuthorized ? '接入方式:' : '服务器 URL (微信后台填写):'}</span>
                       {!isAuthorized && (
                         <button
-                          onClick={() => copyToClipboard(acc.callback_url || '', 'URL')}
+                          onClick={() => copyToClipboard(formatSecureURL(acc.callback_url) || '', 'URL')}
                           className="hover:text-foreground text-primary inline-flex items-center gap-1"
                         >
                           <Copy className="h-3 w-3" />
@@ -314,7 +323,7 @@ export const AccountsPage: React.FC = () => {
                     <div className="truncate text-foreground select-all bg-background/50 px-2 py-1 rounded">
                       {isAuthorized
                         ? `由微信开放平台托管 (${acc.component_appid || 'Component'})`
-                        : acc.callback_url || `/wxmp/${acc.appid}/handler`}
+                        : formatSecureURL(acc.callback_url) || `/wxmp/${acc.appid}/handler`}
                     </div>
 
                     {!isAuthorized && (
@@ -438,16 +447,16 @@ export const AccountsPage: React.FC = () => {
                 <div className="space-y-1">
                   <div className="text-muted-foreground flex justify-between">
                     <span>授权事件接收 URL:</span>
-                    <button onClick={() => copyToClipboard(openComp.auth_event_url, '授权事件URL')} className="text-primary hover:underline">复制</button>
+                    <button onClick={() => copyToClipboard(formatSecureURL(openComp.auth_event_url), '授权事件URL')} className="text-primary hover:underline">复制</button>
                   </div>
-                  <div className="bg-background p-1.5 rounded select-all break-all">{openComp.auth_event_url}</div>
+                  <div className="bg-background p-1.5 rounded select-all break-all">{formatSecureURL(openComp.auth_event_url)}</div>
                 </div>
                 <div className="space-y-1">
                   <div className="text-muted-foreground flex justify-between">
                     <span>代公众号消息事件接收 URL:</span>
-                    <button onClick={() => copyToClipboard(openComp.msg_notify_url, '消息事件URL')} className="text-primary hover:underline">复制</button>
+                    <button onClick={() => copyToClipboard(formatSecureURL(openComp.msg_notify_url), '消息事件URL')} className="text-primary hover:underline">复制</button>
                   </div>
-                  <div className="bg-background p-1.5 rounded select-all break-all">{openComp.msg_notify_url}</div>
+                  <div className="bg-background p-1.5 rounded select-all break-all">{formatSecureURL(openComp.msg_notify_url)}</div>
                 </div>
               </div>
             )}

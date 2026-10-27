@@ -5,8 +5,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/anchel/wechat-official-account-admin/config"
-	"github.com/anchel/wechat-official-account-admin/internal/database"
+		"github.com/anchel/wechat-official-account-admin/internal/database"
 	"github.com/anchel/wechat-official-account-admin/internal/logger"
 	"github.com/anchel/wechat-official-account-admin/internal/model"
 	"github.com/anchel/wechat-official-account-admin/internal/service"
@@ -31,11 +30,6 @@ func (h *OpenComponentHandler) GetComponent(c *gin.Context) {
 		return
 	}
 
-	host := config.GlobalConfig.Wechat.PublicHost
-	if host == "" {
-		host = c.Request.Host
-	}
-
 	type ComponentVO struct {
 		model.WxOpenComponent
 		AuthEventURL string `json:"auth_event_url"`
@@ -44,8 +38,8 @@ func (h *OpenComponentHandler) GetComponent(c *gin.Context) {
 
 	vo := ComponentVO{
 		WxOpenComponent: comp,
-		AuthEventURL:    fmt.Sprintf("http://%s/open/component/notify", host),
-		MsgNotifyURL:    fmt.Sprintf("http://%s/open/component/$APPID$/callback", host),
+		AuthEventURL:    BuildPublicURL(c, "/open/component/notify"),
+		MsgNotifyURL:    BuildPublicURL(c, "/open/component/$APPID$/callback"),
 	}
 
 	Ok(c, vo)
@@ -102,11 +96,7 @@ func (h *OpenComponentHandler) GetAuthURL(c *gin.Context) {
 
 	redirectURI := c.Query("redirect_uri")
 	if redirectURI == "" {
-		host := config.GlobalConfig.Wechat.PublicHost
-		if host == "" {
-			host = c.Request.Host
-		}
-		redirectURI = fmt.Sprintf("http://%s/api/open/auth-callback?tenant_id=%d", host, tenantID)
+		redirectURI = BuildPublicURL(c, fmt.Sprintf("/api/open/auth-callback?tenant_id=%d", tenantID))
 	}
 
 	authURL, err := service.DefaultWxOpenService.BuildAuthURL(c.Request.Context(), comp.ComponentAppID, redirectURI)

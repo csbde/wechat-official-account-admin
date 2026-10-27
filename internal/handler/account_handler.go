@@ -4,8 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/anchel/wechat-official-account-admin/config"
-	"github.com/anchel/wechat-official-account-admin/internal/database"
+		"github.com/anchel/wechat-official-account-admin/internal/database"
 	"github.com/anchel/wechat-official-account-admin/internal/model"
 	"github.com/gin-gonic/gin"
 )
@@ -55,18 +54,13 @@ func (h *AccountHandler) List(c *gin.Context) {
 		CallbackURL string `json:"callback_url"`
 	}
 
-	host := config.GlobalConfig.Wechat.PublicHost
-	if host == "" {
-		host = c.Request.Host
-	}
-
 	result := make([]AccountVO, len(list))
 	for i, acc := range list {
 		if !isAdmin {
 			acc.AppSecret = "******"
 			acc.EncodingAESKey = "******"
 		}
-		cb := fmt.Sprintf("http://%s/wxmp/%s/handler", host, acc.AppID)
+		cb := BuildPublicURL(c, fmt.Sprintf("/wxmp/%s/handler", acc.AppID))
 		result[i] = AccountVO{
 			WxAccount:   acc,
 			CallbackURL: cb,

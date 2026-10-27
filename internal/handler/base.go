@@ -1,8 +1,12 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
+
+	"github.com/anchel/wechat-official-account-admin/config"
 
 	"github.com/gin-gonic/gin"
 )
@@ -90,4 +94,42 @@ func GetTenantID(c *gin.Context) uint {
 func IsSuperAdmin(c *gin.Context) bool {
 	role, exists := c.Get("role")
 	return exists && role == "superadmin"
+}
+
+// GetRequestScheme 获取请求的真实协议 (支持上级反向代理 X-Forwarded-Proto)
+func GetRequestScheme(c *gin.Context) string {
+	if proto := c.GetHeader("X-Forwarded-Proto"); proto != "" {
+		return strings.ToLower(proto)
+	}
+	if c.Request.TLS != nil {
+		return "https"
+	}
+	return "http"
+}
+
+// GetPublicHost 获取对外公网的 Scheme 和 Host (自适应反向代理及 public_host 配置)
+func GetPublicHost(c *gin.Context) (scheme, host string) {
+	pubHost := strings.TrimSpace(config.GlobalConfig.Wechat.PublicHost)
+	if pubHost != "" {
+		if strings.HasPrefix(pubHost, "https://") {
+			return "https", strings.TrimPrefix(pubHost, "https://")
+		}
+		if strings.HasPrefix(pubHost, "http://") {
+			return "http", strings.TrimPrefix(pubHost, "http://")
+		}
+		return GetRequestScheme(c), pubHost
+	}
+
+	h := c.GetHeader("X-Forwarded-Host")
+	if h == "" {
+		h = c.Request.Host
+	}
+	return GetRequestScheme(c), h
+}
+
+// BuildPublicURL 构建对外统一的公网 URL (自动处理 https 与反向代理)
+func BuildPublicURL(c *gin.Context, path string) string {
+	scheme, host := GetPublicHost(c)
+	path = "/" + strings.TrimPrefix(path, "/")
+	return fmt.Sprintf("%s://%s%s", scheme, strings.TrimRight(host, "/"), path)
 }

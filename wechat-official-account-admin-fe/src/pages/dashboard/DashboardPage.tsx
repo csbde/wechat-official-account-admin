@@ -174,7 +174,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigate }) => {
                   <div className="p-3 rounded-lg bg-muted/60 space-y-1">
                     <div className="text-xs text-muted-foreground">服务器 URL (微信后台填写):</div>
                     <div className="font-mono text-xs font-semibold select-all break-all text-primary">
-                      {currentApp.callback_url || `/wxmp/${currentApp.appid}/handler`}
+                      {(typeof window !== "undefined" && window.location.protocol === "https:" && (currentApp.callback_url || "").startsWith("http:")) ? currentApp.callback_url.replace(/^http:/, "https:") : (currentApp.callback_url || `/wxmp/${currentApp.appid}/handler`)}
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
