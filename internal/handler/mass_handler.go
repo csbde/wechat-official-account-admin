@@ -7,9 +7,33 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/anchel/wechat-official-account-admin/internal/database"
+	"github.com/anchel/wechat-official-account-admin/internal/model"
 	"github.com/anchel/wechat-official-account-admin/internal/service"
 	"github.com/gin-gonic/gin"
 )
+
+// requireSyncedTagID 校验「按标签群发」的 tag_id：必须是当前公众号 + 当前租户下、
+// 且已真实同步到微信官方的标签。「仅本地」标签 (负的占位 ID) 微信并不认识，
+// 过去直接透传只会收到一句难以理解的官方报错。
+func requireSyncedTagID(c *gin.Context, appid, raw string) bool {
+	tagID, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || tagID == 0 {
+		Fail(c, http.StatusBadRequest, "tag_id 不合法，请在下拉框重新选择标签")
+		return false
+	}
+	var tag model.WxTag
+	if err := database.DB.Where("tag_id = ? AND app_id = ? AND tenant_id = ?", tagID, appid, GetTenantID(c)).
+		First(&tag).Error; err != nil {
+		Fail(c, http.StatusBadRequest, "该标签不存在或不属于当前公众号 (tag_id="+raw+")，请先到「粉丝与标签」创建标签")
+		return false
+	}
+	if !tag.Synced || service.IsLocalOnlyFanTagID(tag.TagID) {
+		Fail(c, http.StatusBadRequest, "标签「"+tag.Name+"」目前仅在本地记录，请先在「标签管理」点「重新同步到微信」，再按标签群发")
+		return false
+	}
+	return true
+}
 
 // failMass 统一错误响应: 参数校验类错误返回 400，微信接口/网络类错误返回 500
 func failMass(c *gin.Context, prefix string, err error) {
@@ -84,6 +108,11 @@ func (h *MassHandler) SendAll(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		Fail(c, http.StatusBadRequest, "参数格式错误: "+err.Error())
 		return
+	}
+	if !req.IsToAll {
+		if !requireSyncedTagID(c, appid, req.TagID) {
+			return
+		}
 	}
 	res, err := service.DefaultWxMassService.SendAll(c.Request.Context(), appid, req.IsToAll, req.TagID, req.MassMessage, req.ClientMsgID, req.IgnoreReprint)
 	if err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/anchel/wechat-official-account-admin/config"
 	"github.com/anchel/wechat-official-account-admin/internal/logger"
@@ -24,6 +25,16 @@ var Server *asynq.Server
 type SyncFansPayload struct {
 	TenantID uint   `json:"tenant_id"`
 	AppID    string `json:"appid"`
+}
+
+// BatchTaggingPayload 粉丝标签逐条重试任务参数
+// 整批 (50 人) 被微信拒绝时派发：逐个 openid 调用，避免一人失败拖垮整批
+type BatchTaggingPayload struct {
+	TenantID uint     `json:"tenant_id"`
+	AppID    string   `json:"appid"`
+	TagID    int      `json:"tag_id"`
+	Action   string   `json:"action"` // add / remove
+	OpenIDs  []string `json:"openids"`
 }
 
 func Init(cfg *config.Config) (*asynq.Client, *asynq.Server, error) {
@@ -72,6 +83,26 @@ func EnqueueSyncFans(tenantID uint, appid string) error {
 	return nil
 }
 
+// EnqueueBatchTaggingRetry 派发标签逐条重试任务 (低优先级队列，不挤占粉丝同步)
+func EnqueueBatchTaggingRetry(p BatchTaggingPayload) error {
+	if Client == nil {
+		return fmt.Errorf("asynq client is nil (redis not configured)")
+	}
+	payload, _ := json.Marshal(p)
+	task := asynq.NewTask(TypeBatchTagging, payload)
+	info, err := Client.Enqueue(task, asynq.Queue("low"), asynq.MaxRetry(1), asynq.Timeout(30*time.Minute))
+	if err != nil {
+		return err
+	}
+	logger.Info("Enqueued fan tag retry task",
+		zap.String("task_id", info.ID),
+		zap.String("appid", p.AppID),
+		zap.Int("tag_id", p.TagID),
+		zap.Int("openids", len(p.OpenIDs)),
+	)
+	return nil
+}
+
 func StartWorker(server *asynq.Server, handler asynq.Handler) {
 	go func() {
 		if err := server.Run(handler); err != nil {
@@ -89,6 +120,15 @@ func NewServeMux() *asynq.ServeMux {
 		}
 		logger.Info("Processing sync fans Asynq task", zap.String("appid", p.AppID))
 		return service.DefaultFanSyncManager.DoSyncFansTask(ctx, p.TenantID, p.AppID)
+	})
+	mux.HandleFunc(TypeBatchTagging, func(ctx context.Context, t *asynq.Task) error {
+		var p BatchTaggingPayload
+		if err := json.Unmarshal(t.Payload(), &p); err != nil {
+			return err
+		}
+		logger.Info("Processing fan tag retry Asynq task",
+			zap.String("appid", p.AppID), zap.Int("tag_id", p.TagID), zap.Int("openids", len(p.OpenIDs)))
+		return service.DefaultFanTagRetryManager.RetryTaggingOneByOne(ctx, p.TenantID, p.AppID, p.TagID, p.Action, p.OpenIDs)
 	})
 	return mux
 }

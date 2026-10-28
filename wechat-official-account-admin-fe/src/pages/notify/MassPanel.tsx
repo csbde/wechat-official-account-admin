@@ -396,8 +396,15 @@ export const MassPanel: React.FC = () => {
                 </SelectTrigger>
                 <SelectContent>
                   {(tags || []).map((t: any) => (
-                    <SelectItem key={t.tag_id} value={String(t.tag_id)} className="text-xs">
-                      {t.name} (tag_id={t.tag_id}，粉丝 {t.count || 0})
+                    <SelectItem
+                      key={t.tag_id}
+                      value={String(t.tag_id)}
+                      className="text-xs"
+                      disabled={t.synced === false}
+                    >
+                      {t.synced === false
+                        ? `${t.name} (仅本地·未同步，请先在「粉丝与标签」里同步到微信)`
+                        : `${t.name} (tag_id=${t.tag_id}，粉丝 ${t.count || 0})`}
                     </SelectItem>
                   ))}
                   {!tags?.length && (

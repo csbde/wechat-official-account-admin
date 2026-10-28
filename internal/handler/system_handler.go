@@ -178,6 +178,13 @@ func (h *SystemHandler) UpdateUser(c *gin.Context) {
 		}
 	}
 
+	// 租户管理员可以管理本租户成员，但绝不能碰超级管理员账号
+	// (否则可以禁用/改密/降权平台管理员，属于垂直越权)。
+	if user.Role == "superadmin" && !IsSuperAdmin(c) {
+		Fail(c, http.StatusForbidden, "越权操作：超级管理员账号只能由超级管理员本人管理")
+		return
+	}
+
 	var req struct {
 		Nickname string `json:"nickname"`
 		Email    string `json:"email"`
@@ -280,6 +287,10 @@ func (h *SystemHandler) DeleteUser(c *gin.Context) {
 			Fail(c, http.StatusNotFound, "用户不存在")
 			return
 		}
+	}
+	if target.Role == "superadmin" && !IsSuperAdmin(c) {
+		Fail(c, http.StatusForbidden, "越权操作：超级管理员账号只能由超级管理员本人删除")
+		return
 	}
 	if target.Role == "superadmin" && countSuperadmins() <= 1 {
 		Fail(c, http.StatusBadRequest, "不能删除系统内唯一的超级管理员")

@@ -240,6 +240,10 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 			tenant.POST("/fans/tags", fanHandler.CreateTag)
 			tenant.DELETE("/fans/tags/:id", fanHandler.DeleteTag)
 			tenant.POST("/fans/tags/batch", fanHandler.BatchTagging)
+			// 把「仅本地」标签同步到微信官方，换取真实 tag_id (打标签与按标签群发都依赖它)
+			tenant.POST("/fans/tags/:id/push", fanHandler.PushTag)
+			// 标签逐条重试任务进度 (整批被微信拒绝后自动排队逐条重试)
+			tenant.GET("/fans/tags/retry-status", fanHandler.GetTagRetryStatus)
 
 			// 带参二维码
 			qrcodeHandler := &handler.QrcodeHandler{}

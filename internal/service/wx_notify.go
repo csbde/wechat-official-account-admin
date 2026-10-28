@@ -139,9 +139,40 @@ func (s *WxNotifyService) SendTemplateMsg(ctx context.Context, appid string, p T
 		MsgID int64 `json:"msgid"`
 	}
 	if err := s.do(ctx, appid, "POST", "/cgi-bin/message/template/send", nil, body, &res); err != nil {
-		return 0, err
+		return 0, s.explainTemplateIDError(ctx, appid, p.TemplateID, err)
 	}
 	return res.MsgID, nil
+}
+
+// explainTemplateIDError 命中 [40037] invalid template_id 时，实时复核该账号的模板库并给出可自助排查的说明。
+// 背景: 后台「我的模板库」是实时从微信拉取的，正常不会无效；一旦报错几乎都是
+// 「发送时选中的账号 ≠ 模板所属账号」或「模板已被微信删除(改行业/平台清理)」，
+// 只把微信原文抛给用户很难定位，这里直接列出当前账号真正可用的模板。
+func (s *WxNotifyService) explainTemplateIDError(ctx context.Context, appid, templateID string, err error) error {
+	if err == nil || !strings.Contains(err.Error(), "[40037]") {
+		return err
+	}
+	list, lerr := s.GetPrivateTemplates(ctx, appid)
+	if lerr != nil {
+		return fmt.Errorf("%w (复核模板库同样失败: %v)", err, lerr)
+	}
+	if len(list) == 0 {
+		return fmt.Errorf("%w 当前选中账号 appid=%s 的模板库为空，请先设置所属行业并从公共模板库选用模板；第三方授权托管账号还需确认授权时勾选了模板消息相关权限集。", err, appid)
+	}
+	shown := make([]string, 0, 5)
+	for i, t := range list {
+		if i >= 5 {
+			shown = append(shown, "…")
+			break
+		}
+		title := strings.TrimSpace(t.Title)
+		if title == "" {
+			title = "未命名模板"
+		}
+		shown = append(shown, fmt.Sprintf("%s(%s)", title, t.TemplateID))
+	}
+	return fmt.Errorf("%w 该账号 (appid=%s) 当前真正可用的模板 ID 共 %d 个: %s。请刷新模板库后重新选择，并确认顶部选中的公众号没有切换过；你本次使用的 template_id=%s。",
+		err, appid, len(list), strings.Join(shown, "、"), templateID)
 }
 
 // OneTimeSubscribePayload 一次性订阅消息下发入参

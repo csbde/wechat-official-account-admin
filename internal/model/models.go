@@ -149,7 +149,9 @@ type WxFan struct {
 	Subscribe      int            `gorm:"default:1" json:"subscribe"`
 	SubscribeTime  int64          `json:"subscribe_time"`
 	Remark         string         `gorm:"size:255" json:"remark"`
-	TagIDs         string         `gorm:"type:text" json:"tagid_list"`
+	// TagIDs 粉丝标签 ID 列表 (微信风格 JSON 数组文本，如 "[1,2]")。json key 必须与前端与数据库列名保持一致，
+	// 历史 tag 曾误写为 tagid_list，导致前端读 row.tag_ids 永远为空、看起来像"标签打不上"。
+	TagIDs         string         `gorm:"type:text" json:"tag_ids"`
 	SubscribeScene string         `gorm:"size:64" json:"subscribe_scene"`
 	CreatedAt      time.Time      `json:"created_at"`
 	UpdatedAt      time.Time      `json:"updated_at"`
@@ -164,6 +166,10 @@ type WxTag struct {
 	TagID     int            `gorm:"not null" json:"tag_id"`
 	Name      string         `gorm:"size:64;not null" json:"name"`
 	Count     int            `gorm:"default:0" json:"count"`
+	// Synced 标签是否真实存在于微信官方标签体系。
+	// false 表示"仅本地"：TagID 为负的本地占位 ID (-主键 ID)，不能用于微信打标签与按标签群发，
+	// 可在标签管理里点「重新同步到微信」换取真实 tag_id。
+	Synced    bool           `gorm:"not null;default:true" json:"synced"`
 	CreatedAt time.Time      `json:"created_at"`
 	UpdatedAt time.Time      `json:"updated_at"`
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`

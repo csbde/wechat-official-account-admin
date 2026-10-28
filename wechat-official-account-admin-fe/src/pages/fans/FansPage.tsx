@@ -31,6 +31,7 @@ import {
   Users,
   Tag,
   RefreshCw,
+  UploadCloud,
   Search,
   Edit2,
   Trash2,
@@ -66,6 +67,9 @@ export const FansPage: React.FC = () => {
 
   // 微信标签体系管理弹窗
   const [tagModalOpen, setTagModalOpen] = useState(false)
+  // 标签逐条重试 (整批被微信拒绝后自动排队逐条重试)
+  const [retryRunning, setRetryRunning] = useState(false)
+  const [retryOpen, setRetryOpen] = useState(false)
   const [newTagName, setNewTagName] = useState('')
 
   // 轮询同步进度状态
@@ -142,34 +146,73 @@ export const FansPage: React.FC = () => {
       if (d?.synced) {
         toast.success(`微信标签创建成功并同步至官方 (tag_id=${d?.tag?.tag_id})`)
       } else {
-        toast.warning(d?.message || '标签仅在本地创建，未同步至微信官方', { duration: 6000 })
+        toast.warning(d?.message || '标签仅在本地创建，未同步至微信官方', { duration: 8000 })
       }
       queryClient.invalidateQueries({ queryKey: ['fans-tags'] })
       setNewTagName('')
     },
   })
 
-  // 删除标签 (向微信官方同步删除)
+  // 删除标签 (真实标签向微信官方同步删除，仅本地标签直接清理本地，并同步清掉粉丝身上的残留 ID)
   const deleteTagMutation = useMutation({
     mutationFn: (id: number) => api.delete(`/api/fans/tags/${id}`),
-    onSuccess: () => {
-      toast.success('微信标签已同步删除')
+    onSuccess: (d: any) => {
+      toast.success(d?.message || '标签已删除')
       queryClient.invalidateQueries({ queryKey: ['fans-tags'] })
       queryClient.invalidateQueries({ queryKey: ['fans'] })
     },
   })
 
-  // 批量打/移除标签 (向微信官方同步)
+  // 把「仅本地」标签同步到微信官方，换取真实 tag_id (打标签与按标签群发都依赖它)
+  const pushTagMutation = useMutation({
+    mutationFn: (id: number) => api.post(`/api/fans/tags/${id}/push`),
+    onSuccess: (d: any) => {
+      toast.success(d?.message || '标签已同步到微信官方')
+      queryClient.invalidateQueries({ queryKey: ['fans-tags'] })
+      queryClient.invalidateQueries({ queryKey: ['fans'] })
+    },
+  })
+
+  // 批量打/移除标签 (微信官方优先；微信失败时后端仍先写本地并标记 synced=false)
   const batchTagMutation = useMutation({
     mutationFn: (values: { openids: string[]; tag_id: number; action: string }) =>
       api.post('/api/fans/tags/batch', values),
-    onSuccess: () => {
-      toast.success('微信标签同步更新成功！')
+    onSuccess: (d: any) => {
+      if (d?.synced) {
+        toast.success(d?.message || '微信标签同步更新成功！')
+      } else {
+        if (d?.retry_queued) setRetryRunning(true)
+        toast.warning(d?.message || '已先在本地记录，但微信官方未同步', { duration: 8000 })
+      }
       queryClient.invalidateQueries({ queryKey: ['fans'] })
       queryClient.invalidateQueries({ queryKey: ['fans-tags'] })
       setSelectedOpenIDs([])
     },
   })
+
+  // 标签逐条重试任务进度
+  const { data: retryStatus } = useQuery<any>({
+    queryKey: ['fans-tag-retry', currentApp?.appid],
+    queryFn: () => api.get('/api/fans/tags/retry-status'),
+    enabled: !!currentApp,
+    refetchInterval: retryRunning ? 1500 : false,
+  })
+
+  useEffect(() => {
+    if (!retryStatus) return
+    if (retryStatus.status === 'running') {
+      setRetryRunning(true)
+      return
+    }
+    if (retryRunning) {
+      setRetryRunning(false)
+      if (retryStatus.status === 'completed') toast.success(retryStatus.message || '标签逐条重试完成')
+      else if (retryStatus.status === 'partial') toast.warning(retryStatus.message || '标签逐条重试部分失败')
+      else if (retryStatus.status === 'failed') toast.error(retryStatus.message || '标签逐条重试失败')
+      queryClient.invalidateQueries({ queryKey: ['fans'] })
+      queryClient.invalidateQueries({ queryKey: ['fans-tags'] })
+    }
+  }, [retryStatus, retryRunning, queryClient])
 
   // 计算总页数
   const total = fansResult?.pagination?.total || 0
@@ -288,9 +331,16 @@ export const FansPage: React.FC = () => {
             <div className="flex flex-wrap items-center gap-1">
               {list.map((tagId) => {
                 const found = tags?.find((t) => t.tag_id === tagId)
+                const unsynced = found && found.synced === false
                 return (
-                  <Badge key={tagId} variant="secondary" className="text-[10px] py-0 px-1.5">
+                  <Badge
+                    key={tagId}
+                    variant={unsynced ? 'outline' : 'secondary'}
+                    className={`text-[10px] py-0 px-1.5 ${unsynced ? 'border-amber-500/50 text-amber-700 dark:text-amber-400' : ''}`}
+                    title={unsynced ? '该标签仅在本地记录，尚未同步到微信官方，点标签行里的「重新同步到微信」补齐' : undefined}
+                  >
                     {found ? found.name : `Tag ${tagId}`}
+                    {unsynced && <span className="ml-1 font-semibold">未同步</span>}
                   </Badge>
                 )
               })}
@@ -454,6 +504,63 @@ export const FansPage: React.FC = () => {
         </Card>
       )}
 
+      {/* 标签逐条重试进度：整批被微信拒绝后由队列逐个 openid 重试，这里点名失败者 */}
+      {retryStatus && retryStatus.status !== 'idle' && (
+        <Card className="border-amber-500/40 bg-amber-500/5">
+          <CardContent className="p-4 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                {retryStatus.status === 'running' ? (
+                  <RefreshCw className="h-4 w-4 text-amber-600 animate-spin" />
+                ) : (
+                  <AlertCircle className="h-4 w-4 text-amber-600" />
+                )}
+                <span className="font-semibold text-sm">
+                  标签逐条重试 · {retryStatus.tag_name || ('tag_id=' + retryStatus.tag_id)}（
+                  {retryStatus.action === 'remove' ? '取消标签' : '打标签'}）
+                </span>
+                <Badge variant={retryStatus.status === 'completed' ? 'success' : 'outline'} className="text-[10px]">
+                  {(retryStatus.status || '').toUpperCase()}
+                </Badge>
+              </div>
+              <div className="flex items-center gap-2">
+                {retryStatus.failed > 0 && (
+                  <button
+                    onClick={() => setRetryOpen((v) => !v)}
+                    className="text-[11px] text-amber-700 dark:text-amber-300 hover:underline"
+                  >
+                    {retryOpen ? '收起失败名单' : `失败名单 (${retryStatus.failed})`}
+                  </button>
+                )}
+                <span className="font-mono text-xs font-semibold text-amber-700 dark:text-amber-300">
+                  {retryStatus.done} / {retryStatus.total} · 成功 {retryStatus.ok} 失败 {retryStatus.failed}
+                </span>
+              </div>
+            </div>
+
+            <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
+              <div
+                className="h-full bg-amber-500 transition-all duration-300"
+                style={{ width: (retryStatus.percent < 5 ? 5 : retryStatus.percent) + '%' }}
+              />
+            </div>
+
+            <div className="text-xs text-muted-foreground">{retryStatus.message}</div>
+
+            {retryOpen && retryStatus.failures && retryStatus.failures.length > 0 && (
+              <div className="max-h-44 overflow-y-auto rounded-lg border bg-background divide-y">
+                {retryStatus.failures.map((f: any) => (
+                  <div key={f.openid} className="p-2 text-[11px] space-y-0.5">
+                    <div className="font-mono font-semibold">{f.openid}</div>
+                    <div className="text-muted-foreground break-words">{f.reason}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* 搜索与筛选栏 */}
       <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-card rounded-xl border">
         <div className="flex flex-wrap items-center gap-2.5 flex-1 max-w-xl">
@@ -481,7 +588,7 @@ export const FansPage: React.FC = () => {
             <option value="">全部标签</option>
             {tags?.map((t) => (
               <option key={t.tag_id} value={t.tag_id}>
-                {t.name} ({t.count}人)
+                {t.name} ({t.count}人){t.synced === false ? ' · 仅本地' : ''}
               </option>
             ))}
           </select>
@@ -507,7 +614,7 @@ export const FansPage: React.FC = () => {
               <option value="">批量打标签...</option>
               {tags?.map((t) => (
                 <option key={t.tag_id} value={t.tag_id}>
-                  {t.name}
+                  {t.synced === false ? `${t.name} (仅本地·未同步)` : t.name}
                 </option>
               ))}
             </select>
@@ -527,7 +634,7 @@ export const FansPage: React.FC = () => {
               <option value="">批量移除标签...</option>
               {tags?.map((t) => (
                 <option key={t.tag_id} value={t.tag_id}>
-                  {t.name}
+                  {t.synced === false ? `${t.name} (仅本地·未同步)` : t.name}
                 </option>
               ))}
             </select>
@@ -700,7 +807,12 @@ export const FansPage: React.FC = () => {
                             : 'hover:bg-muted text-foreground'
                         }`}
                       >
-                        <span className="truncate">{t.name}</span>
+                        <span className="truncate flex items-center gap-1">
+                          <span className="truncate">{t.name}</span>
+                          {t.synced === false && (
+                            <span className="text-[9px] text-amber-600 shrink-0">未同步</span>
+                          )}
+                        </span>
                         {isTagged && <Check className="h-3.5 w-3.5 text-emerald-600 shrink-0" />}
                       </button>
                     )
@@ -774,9 +886,25 @@ export const FansPage: React.FC = () => {
                   <div className="flex items-center gap-2">
                     <span className="font-semibold">{t.name}</span>
                     <Badge variant="outline" className="text-[10px]">{t.count} 人</Badge>
+                    {t.synced === false && (
+                      <Badge variant="outline" className="text-[10px] border-amber-500/50 text-amber-700 dark:text-amber-400">
+                        仅本地·未同步
+                      </Badge>
+                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] text-muted-foreground font-mono">ID: {t.tag_id}</span>
+                    {t.synced === false && (
+                      <button
+                        onClick={() => pushTagMutation.mutate(t.id)}
+                        disabled={pushTagMutation.isPending}
+                        className="text-amber-600 hover:underline inline-flex items-center gap-0.5"
+                        title="向微信官方创建该标签并换取真实 tag_id (已打上此标签的粉丝会自动迁移)"
+                      >
+                        <UploadCloud className="h-3.5 w-3.5" />
+                        <span>重新同步到微信</span>
+                      </button>
+                    )}
                     <button
                       onClick={() => {
                         if (confirm(`确认向微信官方同步删除标签 "${t.name}"？`)) {

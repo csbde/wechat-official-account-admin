@@ -81,6 +81,7 @@ export const SystemPage: React.FC = () => {
   const { data: tenantRows } = useQuery<any[]>({
     queryKey: ['system-tenants'],
     queryFn: () => api.get('/api/system/tenants'),
+    enabled: isSuperAdmin,
     retry: 0,
   })
   const viewTenant = activeTenantId ? tenantRows?.find((t) => t.id === activeTenantId) : null
@@ -414,8 +415,10 @@ export const SystemPage: React.FC = () => {
         </Card>
       </div>
 
-      {/* 租户与组织管理 (多租户隔离的根) */}
-      <TenantPanel />
+      {/* 租户与组织管理 (多租户隔离的根)：仅超级管理员可见。
+          后端本就按 home tenant 收口非超管，这里连"自己租户的行 + 统计"也不再展示，
+          非超管需要的归属信息在上方「当前登录身份」里已经写清了。 */}
+      {isSuperAdmin && <TenantPanel />}
 
       {/* 用户列表 */}
       <Card>
@@ -489,7 +492,7 @@ export const SystemPage: React.FC = () => {
                     <div className="flex items-center gap-2">
                       <Switch
                         checked={u.status === 1}
-                        disabled={u.id === 1}
+                        disabled={u.id === 1 || (!isSuperAdmin && u.role === 'superadmin')}
                         onCheckedChange={(checked) =>
                           toggleStatusMutation.mutate({ id: u.id, status: checked ? 1 : 0 })
                         }
@@ -499,10 +502,12 @@ export const SystemPage: React.FC = () => {
                   </TableCell>
                   <TableCell className="text-muted-foreground">{formatDate(u.created_at)}</TableCell>
                   <TableCell className="text-right space-x-1">
-                    <Button variant="ghost" size="icon" onClick={() => openEditModal(u)} className="h-7 w-7" title="修改信息/重置密码">
-                      <KeyRound className="h-3.5 w-3.5" />
-                    </Button>
-                    {u.id !== 1 && (
+                    {(isSuperAdmin || u.role !== 'superadmin') && (
+                      <Button variant="ghost" size="icon" onClick={() => openEditModal(u)} className="h-7 w-7" title="修改信息/重置密码">
+                        <KeyRound className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                    {u.id !== 1 && (isSuperAdmin || u.role !== 'superadmin') && (
                       <Button
                         variant="ghost"
                         size="icon"

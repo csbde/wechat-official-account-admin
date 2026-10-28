@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -113,11 +112,14 @@ func (m *FanSyncManager) DoSyncFansTask(ctx context.Context, tenantID uint, appi
 					TagID:    tagID,
 					Name:     name,
 					Count:    count,
+					Synced:   true,
 				}
 				database.DB.Create(&wxTag)
 			} else {
 				wxTag.Name = name
 				wxTag.Count = count
+				// 微信官方清单里存在的标签就是真实标签：顺手把历史遗留的 synced=false 纠正回来
+				wxTag.Synced = true
 				database.DB.Save(&wxTag)
 			}
 		}
@@ -236,13 +238,11 @@ func (m *FanSyncManager) DoSyncFansTask(ctx context.Context, tenantID uint, appi
 				headURL = "https://" + strings.TrimPrefix(headURL, "http://")
 			}
 
-			tagBytes, _ := json.Marshal(user.TagIDList)
-			if string(tagBytes) == "null" {
-				tagBytes = []byte("[]")
-			}
-
 			var fan model.WxFan
 			err := database.DB.Where("app_id = ? AND tenant_id = ? AND open_id = ?", appid, tenantID, user.OpenID).First(&fan).Error
+			// 微信返回的 tagid_list 只含真实标签，合并保留本地独有的占位标签 (负 ID)，
+			// 否则「本地已写上、微信未同步」的标签会在下一次同步后被整列覆盖丢失。
+			tagBytes := []byte(MarshalFanTagIDs(MergeLocalOnlyFanTagIDs(user.TagIDList, fan.TagIDs)))
 			if err != nil {
 				fan = model.WxFan{
 					TenantID:       tenantID,
