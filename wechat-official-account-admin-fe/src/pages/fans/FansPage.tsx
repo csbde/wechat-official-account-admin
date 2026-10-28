@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react'
+import { useIsMobile } from '@/hooks/useIsMobile'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   useReactTable,
@@ -48,6 +49,7 @@ import { formatDate } from '@/lib/utils'
 export const FansPage: React.FC = () => {
   const queryClient = useQueryClient()
   const { currentApp } = useAppStore()
+  const isMobile = useIsMobile()
 
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
@@ -413,7 +415,7 @@ export const FansPage: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">粉丝与标签管理</h2>
@@ -422,15 +424,15 @@ export const FansPage: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => setTagModalOpen(true)} className="gap-1.5 text-xs">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
+          <Button variant="outline" onClick={() => setTagModalOpen(true)} className="gap-1.5 text-xs w-full sm:w-auto min-h-[38px] justify-center">
             <Tag className="h-4 w-4" />
             <span>标签管理</span>
           </Button>
           <Button
             onClick={() => syncMutation.mutate()}
             disabled={isSyncing || syncMutation.isPending}
-            className="gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold"
+            className="gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold w-full sm:w-auto min-h-[38px] justify-center"
           >
             <RefreshCw className={`h-4 w-4 ${isSyncing || syncMutation.isPending ? 'animate-spin' : ''}`} />
             <span>{isSyncing ? '正在拉取微信粉丝...' : '异步同步粉丝'}</span>
@@ -562,9 +564,9 @@ export const FansPage: React.FC = () => {
       )}
 
       {/* 搜索与筛选栏 */}
-      <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-card rounded-xl border">
-        <div className="flex flex-wrap items-center gap-2.5 flex-1 max-w-xl">
-          <div className="relative flex-1 min-w-[200px]">
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3 sm:p-4 bg-card rounded-xl border">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 flex-1 w-full max-w-xl">
+          <div className="relative flex-1 w-full sm:min-w-[200px]">
             <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
             <Input
               value={keyword}
@@ -573,7 +575,7 @@ export const FansPage: React.FC = () => {
                 setPage(1)
               }}
               placeholder="搜索粉丝昵称、OpenID 或 备注名..."
-              className="pl-9 text-xs h-9"
+              className="pl-9 text-xs h-9 w-full"
             />
           </div>
 
@@ -583,7 +585,7 @@ export const FansPage: React.FC = () => {
               setSelectedTag(e.target.value)
               setPage(1)
             }}
-            className="h-9 px-3 rounded-lg border border-input bg-background text-xs"
+            className="h-9 px-3 rounded-lg border border-input bg-background text-xs w-full sm:w-auto"
           >
             <option value="">全部标签</option>
             {tags?.map((t) => (
@@ -596,7 +598,7 @@ export const FansPage: React.FC = () => {
 
         {/* 批量操作工具条 */}
         {selectedOpenIDs.length > 0 && (
-          <div className="flex items-center gap-2 text-xs bg-primary/10 text-primary px-3 py-1.5 rounded-lg font-medium">
+          <div className="flex flex-wrap items-center gap-2 text-xs bg-primary/10 text-primary px-3 py-1.5 rounded-lg font-medium w-full sm:w-auto">
             <span>已选 {selectedOpenIDs.length} 人</span>
             <select
               onChange={(e) => {
@@ -642,45 +644,203 @@ export const FansPage: React.FC = () => {
         )}
       </div>
 
-      {/* TanStack Table 渲染 */}
-      <Table>
-        <TableHeader>
-          {table.getHeaderGroups().map((headerGroup) => (
-            <TableRow key={headerGroup.id}>
-              {headerGroup.headers.map((header) => (
-                <TableHead key={header.id}>
-                  {flexRender(header.column.columnDef.header, header.getContext())}
-                </TableHead>
-              ))}
-            </TableRow>
-          ))}
-        </TableHeader>
-        <TableBody>
+      {/* 列表渲染：移动端卡片化，桌面端保持 TanStack Table */}
+      {isMobile ? (
+        <div className="space-y-3">
+          {fansResult?.list && fansResult.list.length > 0 && (
+            <div className="flex items-center justify-between px-1 py-1 text-xs text-muted-foreground">
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={
+                    fansResult?.list &&
+                    fansResult.list.length > 0 &&
+                    fansResult.list.every((f: any) => selectedOpenIDs.includes(f.openid))
+                  }
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      const all = (fansResult?.list || []).map((f: any) => f.openid)
+                      setSelectedOpenIDs(Array.from(new Set([...selectedOpenIDs, ...all])))
+                    } else {
+                      const pageOpenIDs = (fansResult?.list || []).map((f: any) => f.openid)
+                      setSelectedOpenIDs(selectedOpenIDs.filter((id) => !pageOpenIDs.includes(id)))
+                    }
+                  }}
+                  className="h-4 w-4 rounded border-gray-300 text-primary"
+                />
+                <span>全选本页粉丝</span>
+              </label>
+              <span>本页 {fansResult.list.length} 位</span>
+            </div>
+          )}
           {isLoading ? (
-            <TableRow>
-              <TableCell colSpan={columns.length} className="h-32 text-center text-muted-foreground">
-                正在加载粉丝数据...
-              </TableCell>
-            </TableRow>
-          ) : table.getRowModel().rows?.length ? (
-            table.getRowModel().rows.map((row) => (
-              <TableRow key={row.id}>
-                {row.getVisibleCells().map((cell) => (
-                  <TableCell key={cell.id}>
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </TableCell>
+            <div className="py-12 text-center text-muted-foreground text-xs bg-card rounded-xl border">
+              正在加载粉丝数据...
+            </div>
+          ) : fansResult?.list && fansResult.list.length > 0 ? (
+            fansResult.list.map((fan: any) => {
+              const isSelected = selectedOpenIDs.includes(fan.openid)
+              let tagList: number[] = []
+              try {
+                tagList = JSON.parse(fan.tag_ids || '[]')
+              } catch {}
+
+              return (
+                <div
+                  key={fan.id || fan.openid}
+                  className={`p-3.5 rounded-xl border bg-card transition-all space-y-2.5 text-xs ${
+                    isSelected ? 'ring-2 ring-primary/40 border-primary bg-primary/5' : ''
+                  }`}
+                >
+                  {/* 卡片头部：选择框、头像、昵称、状态 */}
+                  <div className="flex items-start justify-between gap-2.5">
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedOpenIDs((prev) => [...prev, fan.openid])
+                          } else {
+                            setSelectedOpenIDs((prev) => prev.filter((id) => id !== fan.openid))
+                          }
+                        }}
+                        className="h-4 w-4 rounded border-gray-300 text-primary shrink-0"
+                      />
+                      <div className="h-10 w-10 rounded-full bg-emerald-600/10 text-emerald-600 overflow-hidden shrink-0 flex items-center justify-center font-bold">
+                        {fan.headimgurl ? (
+                          <img src={fan.headimgurl} referrerPolicy="no-referrer" alt="" className="h-full w-full object-cover" />
+                        ) : (
+                          <span>{(fan.nickname || 'U').slice(0, 1)}</span>
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1 space-y-0.5">
+                        <div className="font-semibold text-foreground truncate text-sm">
+                          {fan.nickname || '微信用户'}
+                        </div>
+                        <div className="flex items-center gap-1.5 text-muted-foreground text-[11px]">
+                          <span>备注: {fan.remark || '无'}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingFan(fan)
+                              setRemarkText(fan.remark || '')
+                              setRemarkModalOpen(true)
+                            }}
+                            className="text-primary hover:underline p-0.5"
+                            title="设置备注"
+                          >
+                            <Edit2 className="h-3 w-3 inline" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <Badge
+                      variant={fan.subscribe === 1 ? 'success' : 'secondary'}
+                      className="text-[10px] shrink-0"
+                    >
+                      {fan.subscribe === 1 ? '已关注' : '已取关'}
+                    </Badge>
+                  </div>
+
+                  {/* 核心信息行：OpenID与关注时间 */}
+                  <div className="p-2.5 rounded-lg bg-muted/50 space-y-1 text-[11px]">
+                    <div className="flex items-center justify-between text-muted-foreground font-mono">
+                      <span>OpenID:</span>
+                      <span className="truncate max-w-[190px] select-all font-medium text-foreground">
+                        {fan.openid}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-muted-foreground">
+                      <span>关注时间:</span>
+                      <span>{formatDate(fan.subscribe_time ? new Date(fan.subscribe_time * 1000) : null)}</span>
+                    </div>
+                  </div>
+
+                  {/* 标签行 */}
+                  <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                    {tagList.map((tagId) => {
+                      const found = tags?.find((t) => t.tag_id === tagId)
+                      const unsynced = found && found.synced === false
+                      return (
+                        <Badge
+                          key={tagId}
+                          variant={unsynced ? 'outline' : 'secondary'}
+                          className={`text-[10px] py-0 px-1.5 ${
+                            unsynced ? 'border-amber-500/50 text-amber-700 dark:text-amber-400' : ''
+                          }`}
+                        >
+                          {found ? found.name : `Tag ${tagId}`}
+                          {unsynced && <span className="ml-1 font-semibold">未同步</span>}
+                        </Badge>
+                      )
+                    })}
+                    {tagList.length === 0 && (
+                      <span className="text-[11px] text-muted-foreground">暂无标签</span>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTaggingFan(fan)
+                        setSingleTagModalOpen(true)
+                      }}
+                      className="text-primary hover:underline text-[11px] inline-flex items-center gap-0.5 ml-auto"
+                    >
+                      <Plus className="h-3 w-3" />
+                      <span>贴标签</span>
+                    </button>
+                  </div>
+                </div>
+              )
+            })
+          ) : (
+            <div className="p-8 text-center text-muted-foreground text-xs bg-card rounded-xl border">
+              暂无粉丝数据，请点击右上角「异步同步粉丝」全量拉取微信数据
+            </div>
+          )}
+        </div>
+      ) : (
+        <Table>
+          <TableHeader>
+            {table.getHeaderGroups().map((headerGroup) => (
+              <TableRow key={headerGroup.id}>
+                {headerGroup.headers.map((header) => (
+                  <TableHead key={header.id}>
+                    {flexRender(header.column.columnDef.header, header.getContext())}
+                  </TableHead>
                 ))}
               </TableRow>
-            ))
-          ) : (
-            <TableRow>
-              <TableCell colSpan={columns.length} className="h-32 text-center text-muted-foreground">
-                暂无粉丝数据，请点击右上角「异步同步粉丝」全量拉取微信数据
-              </TableCell>
-            </TableRow>
-          )}
-        </TableBody>
-      </Table>
+            ))}
+          </TableHeader>
+          <TableBody>
+            {isLoading ? (
+              <TableRow>
+                <TableCell colSpan={columns.length} className="h-32 text-center text-muted-foreground">
+                  正在加载粉丝数据...
+                </TableCell>
+              </TableRow>
+            ) : table.getRowModel().rows?.length ? (
+              table.getRowModel().rows.map((row) => (
+                <TableRow key={row.id}>
+                  {row.getVisibleCells().map((cell) => (
+                    <TableCell key={cell.id}>
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))
+            ) : (
+              <TableRow>
+                <TableCell colSpan={columns.length} className="h-32 text-center text-muted-foreground">
+                  暂无粉丝数据，请点击右上角「异步同步粉丝」全量拉取微信数据
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      )}
 
       {/* 强化版全功能翻页控制器 (重点解决无法翻页问题！) */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-muted-foreground pt-3 border-t">
@@ -734,7 +894,7 @@ export const FansPage: React.FC = () => {
           </div>
 
           {totalPages > 1 && (
-            <form onSubmit={handleJumpPage} className="flex items-center gap-1.5">
+            <form onSubmit={handleJumpPage} className="hidden sm:flex items-center gap-1.5">
               <span>跳至</span>
               <Input
                 type="number"

@@ -245,7 +245,7 @@ export const MenuDesignerPage: React.FC = () => {
   const currentItem = getCurrentItem()
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* 顶部操作条 */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -270,7 +270,7 @@ export const MenuDesignerPage: React.FC = () => {
         </div>
 
         {activeTab === 'normal' ? (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
             <Button
               variant="outline"
               size="sm"
@@ -280,26 +280,26 @@ export const MenuDesignerPage: React.FC = () => {
                   setSelectedPath([])
                 }
               }}
-              className="text-xs text-muted-foreground hover:text-destructive"
+              className="text-xs text-muted-foreground hover:text-destructive flex-1 sm:flex-none min-h-[36px]"
             >
               <RotateCcw className="h-3.5 w-3.5 mr-1" />
               <span>清空重置</span>
             </Button>
-            <Button variant="outline" size="sm" onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending} className="text-xs">
+            <Button variant="outline" size="sm" onClick={() => syncMutation.mutate()} disabled={syncMutation.isPending} className="text-xs flex-1 sm:flex-none min-h-[36px]">
               <DownloadCloud className="h-3.5 w-3.5 mr-1" />
               <span>从微信同步</span>
             </Button>
-            <Button variant="secondary" size="sm" onClick={() => saveDraftMutation.mutate()} disabled={saveDraftMutation.isPending} className="text-xs">
+            <Button variant="secondary" size="sm" onClick={() => saveDraftMutation.mutate()} disabled={saveDraftMutation.isPending} className="text-xs flex-1 sm:flex-none min-h-[36px]">
               <Save className="h-3.5 w-3.5 mr-1" />
               <span>保存草稿</span>
             </Button>
-            <Button size="sm" onClick={() => publishMutation.mutate()} disabled={publishMutation.isPending} className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold">
+            <Button size="sm" onClick={() => publishMutation.mutate()} disabled={publishMutation.isPending} className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold w-full sm:w-auto min-h-[36px]">
               <UploadCloud className="h-3.5 w-3.5 mr-1" />
               <span>{publishMutation.isPending ? '发布中...' : '发布到微信'}</span>
             </Button>
           </div>
         ) : (
-          <Button onClick={() => setCondModalOpen(true)} className="gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700">
+          <Button onClick={() => setCondModalOpen(true)} className="gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 w-full sm:w-auto min-h-[36px]">
             <Plus className="h-4 w-4" />
             <span>新建个性化条件菜单</span>
           </Button>
@@ -315,10 +315,10 @@ export const MenuDesignerPage: React.FC = () => {
 
         <TabsContent value="normal" className="mt-6">
           {/* 设计器双栏布局：左手机预览，右属性面板 */}
-          <div className="grid gap-6 lg:grid-cols-12 items-start">
+          <div className="grid gap-4 sm:gap-6 grid-cols-1 lg:grid-cols-12 items-start">
             {/* 左侧：手机效果模拟器 */}
             <div className="lg:col-span-5 flex justify-center">
-              <div className="w-[320px] h-[580px] rounded-[2.5rem] border-8 border-slate-800 dark:border-slate-700 bg-slate-900 shadow-2xl relative flex flex-col overflow-hidden">
+              <div className="w-full max-w-[320px] h-[540px] sm:h-[580px] rounded-[2.5rem] border-8 border-slate-800 dark:border-slate-700 bg-slate-900 shadow-2xl relative flex flex-col overflow-hidden">
                 <div className="h-6 w-full flex justify-center items-center">
                   <div className="h-3 w-20 rounded-full bg-slate-800"></div>
                 </div>
@@ -661,7 +661,7 @@ export const MenuDesignerPage: React.FC = () => {
               </select>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold">性别匹配</label>
                 <select

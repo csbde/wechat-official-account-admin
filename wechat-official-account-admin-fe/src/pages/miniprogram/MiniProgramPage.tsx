@@ -353,7 +353,7 @@ export const MiniProgramPage: React.FC = () => {
   const linkedList: any[] = linkedRes?.items || []
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">
@@ -366,7 +366,7 @@ export const MiniProgramPage: React.FC = () => {
         </div>
 
         {activeTab === 'register' && (
-          <Button onClick={() => setCreateModalOpen(true)} className="gap-2 bg-emerald-600 hover:bg-emerald-700">
+          <Button onClick={() => setCreateModalOpen(true)} className="gap-2 bg-emerald-600 hover:bg-emerald-700 w-full sm:w-auto min-h-[38px] justify-center">
             <Plus className="h-4 w-4" />
             <span>快速创建小程序 (免认证费)</span>
           </Button>
@@ -933,7 +933,7 @@ export const MiniProgramPage: React.FC = () => {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <label className="font-semibold text-foreground">uploadFile 合法域名</label>
                   <Input
@@ -1231,7 +1231,7 @@ export const MiniProgramPage: React.FC = () => {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <label className="font-semibold text-foreground">企业代码类型</label>
                   <select
@@ -1256,7 +1256,7 @@ export const MiniProgramPage: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <label className="font-semibold text-foreground">法人姓名 (与执照一致) *</label>
                   <Input
@@ -1339,7 +1339,7 @@ export const MiniProgramPage: React.FC = () => {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className="font-semibold text-foreground">发送通知给小程序管理员</label>
                 <select

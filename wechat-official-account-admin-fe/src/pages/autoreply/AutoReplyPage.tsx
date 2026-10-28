@@ -248,7 +248,7 @@ export const AutoReplyPage: React.FC = () => {
     })
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">
@@ -261,7 +261,7 @@ export const AutoReplyPage: React.FC = () => {
         </div>
 
         {activeTab === 'rules' && (
-          <Button onClick={() => openCreateModal('keyword')} className="gap-2 bg-emerald-600 hover:bg-emerald-700">
+          <Button onClick={() => openCreateModal('keyword')} className="gap-2 bg-emerald-600 hover:bg-emerald-700 w-full sm:w-auto min-h-[38px] justify-center">
             <Plus className="h-4 w-4" />
             <span>新建关键词规则</span>
           </Button>
@@ -284,7 +284,7 @@ export const AutoReplyPage: React.FC = () => {
         {/* 规则回复标签页 */}
         <TabsContent value="rules" className="mt-6 space-y-6">
           {/* 快捷引导卡片 */}
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-3 sm:gap-4 grid-cols-1 md:grid-cols-2">
             {/* 关注回复卡片 */}
             {(() => {
               const subRule = rules?.find((r) => r.rule_type === 'subscribe')
@@ -378,9 +378,9 @@ export const AutoReplyPage: React.FC = () => {
 
           {/* 关键词规则列表 */}
           <div className="space-y-4">
-            <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
               <h3 className="text-lg font-bold">关键词匹配规则列表</h3>
-              <div className="relative w-64">
+              <div className="relative w-full sm:w-64">
                 <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
                 <Input
                   value={searchKw}
@@ -402,7 +402,7 @@ export const AutoReplyPage: React.FC = () => {
                   } catch {}
 
                   return (
-                    <Card key={rule.id} className="p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <Card key={rule.id} className="p-3 sm:p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-4">
                       <div className="space-y-2 flex-1">
                         <div className="flex items-center gap-3">
                           <span className="font-bold text-base">{rule.rule_name}</span>
@@ -428,7 +428,7 @@ export const AutoReplyPage: React.FC = () => {
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-3 shrink-0 self-end md:self-center">
+                      <div className="flex items-center justify-between md:justify-end gap-3 shrink-0 w-full md:w-auto pt-2 md:pt-0 border-t md:border-t-0 border-border/50">
                         <div className="flex items-center gap-2">
                           <span className="text-xs text-muted-foreground">启用</span>
                           <Switch
@@ -466,7 +466,7 @@ export const AutoReplyPage: React.FC = () => {
 
         {/* AI 智能助手标签页 */}
         <TabsContent value="ai" className="mt-6 space-y-6">
-          <div className="grid gap-6 lg:grid-cols-12 items-start">
+          <div className="grid gap-4 sm:gap-6 grid-cols-1 lg:grid-cols-12 items-start">
             {/* 左侧：AI 配置参数 */}
             <div className="lg:col-span-7">
               <Card>
@@ -661,7 +661,7 @@ export const AutoReplyPage: React.FC = () => {
             {ruleType === 'keyword' && (
               <div className="space-y-2">
                 <label className="text-xs font-semibold">添加触发关键词 *</label>
-                <div className="flex gap-2">
+                <div className="flex flex-col sm:flex-row gap-2">
                   <Input
                     value={inputKw}
                     onChange={(e) => setInputKw(e.target.value)}
@@ -669,18 +669,20 @@ export const AutoReplyPage: React.FC = () => {
                     className="flex-1"
                     onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addKeyword())}
                   />
-                  <Select value={inputKwMatch} onValueChange={(v: any) => setInputKwMatch(v)}>
-                    <SelectTrigger className="w-28">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="full">全匹配(精准)</SelectItem>
-                      <SelectItem value="half">半匹配(包含)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Button type="button" variant="secondary" onClick={addKeyword}>
-                    添加
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Select value={inputKwMatch} onValueChange={(v: any) => setInputKwMatch(v)}>
+                      <SelectTrigger className="w-full sm:w-28">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="full">全匹配(精准)</SelectItem>
+                        <SelectItem value="half">半匹配(包含)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Button type="button" variant="secondary" onClick={addKeyword} className="shrink-0 min-h-[38px] px-4">
+                      添加
+                    </Button>
+                  </div>
                 </div>
 
                 <div className="flex flex-wrap gap-1.5 pt-1 min-h-[32px]">

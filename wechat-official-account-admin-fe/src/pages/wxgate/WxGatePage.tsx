@@ -92,7 +92,7 @@ export const WxGatePage: React.FC = () => {
     : '请先在顶部选择一个微信公众号'
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* 顶部标题与核心特性 */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -107,7 +107,7 @@ export const WxGatePage: React.FC = () => {
       </div>
 
       {/* 核心指标统计 */}
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">

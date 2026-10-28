@@ -243,7 +243,7 @@ export const SystemPage: React.FC = () => {
     `${typeof window !== 'undefined' ? window.location.origin : ''}/api/auth/oidc/callback`
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">系统管理与 RBAC 权限</h2>
@@ -252,7 +252,7 @@ export const SystemPage: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2 w-full sm:w-auto">
           {/* 配置 OIDC 按钮 (系统级 SSO，仅超级管理员可改) */}
           {isSuperAdmin && (
             <Button
@@ -607,7 +607,7 @@ export const SystemPage: React.FC = () => {
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className="font-semibold text-foreground">客户端 ID (Client ID) *</label>
                 <Input

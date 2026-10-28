@@ -146,7 +146,7 @@ export const MaterialsPage: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">素材与多媒体管理</h2>
@@ -157,7 +157,7 @@ export const MaterialsPage: React.FC = () => {
 
         {/* 右上角操作按钮：区分多媒体文件上传与图文文章新建 */}
         {activeTab === 'news' ? (
-          <Button onClick={() => setNewsModalOpen(true)} className="gap-2 bg-emerald-600 hover:bg-emerald-700">
+          <Button onClick={() => setNewsModalOpen(true)} className="w-full sm:w-auto min-h-[38px] gap-2 bg-emerald-600 hover:bg-emerald-700 justify-center">
             <Plus className="h-4 w-4" />
             <span>新建图文文章</span>
           </Button>
@@ -177,7 +177,7 @@ export const MaterialsPage: React.FC = () => {
                   : '*'
               }
             />
-            <div className="inline-flex items-center justify-center rounded-lg text-sm font-medium bg-primary text-primary-foreground shadow hover:bg-primary/90 h-9 px-4 gap-2">
+            <div className="inline-flex items-center justify-center rounded-lg text-sm font-medium bg-primary text-primary-foreground shadow hover:bg-primary/90 h-9 min-h-[38px] px-4 gap-2 w-full sm:w-auto">
               <Upload className="h-4 w-4" />
               <span>
                 上传{activeTab === 'image' ? '图片' : activeTab === 'voice' ? '语音' : '视频'}文件
@@ -195,20 +195,20 @@ export const MaterialsPage: React.FC = () => {
           setPage(1)
         }}
       >
-        <TabsList className="grid grid-cols-4 max-w-md">
-          <TabsTrigger value="image" className="gap-1.5 text-xs">
+        <TabsList className="grid grid-cols-4 max-w-md w-full h-auto p-1">
+          <TabsTrigger value="image" className="gap-1 sm:gap-1.5 text-[11px] sm:text-xs py-1.5 px-1">
             <ImageIcon className="h-3.5 w-3.5" />
             <span>图片素材</span>
           </TabsTrigger>
-          <TabsTrigger value="news" className="gap-1.5 text-xs">
+          <TabsTrigger value="news" className="gap-1 sm:gap-1.5 text-[11px] sm:text-xs py-1.5 px-1">
             <FileText className="h-3.5 w-3.5 text-blue-500" />
             <span>图文文章</span>
           </TabsTrigger>
-          <TabsTrigger value="voice" className="gap-1.5 text-xs">
+          <TabsTrigger value="voice" className="gap-1 sm:gap-1.5 text-[11px] sm:text-xs py-1.5 px-1">
             <Music className="h-3.5 w-3.5" />
             <span>语音</span>
           </TabsTrigger>
-          <TabsTrigger value="video" className="gap-1.5 text-xs">
+          <TabsTrigger value="video" className="gap-1 sm:gap-1.5 text-[11px] sm:text-xs py-1.5 px-1">
             <Video className="h-3.5 w-3.5" />
             <span>视频</span>
           </TabsTrigger>
@@ -218,7 +218,7 @@ export const MaterialsPage: React.FC = () => {
           {isLoading ? (
             <div className="py-12 text-center text-muted-foreground">正在加载素材列表...</div>
           ) : pageData?.list && pageData.list.length > 0 ? (
-            <div className="grid gap-6 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+            <div className="grid gap-3 sm:gap-4 md:gap-6 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
               {pageData.list.map((item: any) => {
                 const isNews = item.media_type === 'news'
 
@@ -401,7 +401,7 @@ export const MaterialsPage: React.FC = () => {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className="font-semibold text-foreground">作者 (选填)</label>
                 <Input

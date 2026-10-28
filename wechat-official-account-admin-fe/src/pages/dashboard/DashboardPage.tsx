@@ -62,9 +62,9 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigate }) => {
   const overallHealthy = healthData?.overall_status === 'healthy'
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* 顶部欢迎卡片 */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-emerald-600 via-emerald-700 to-teal-800 p-8 text-white shadow-lg shadow-emerald-900/10">
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-emerald-600 via-emerald-700 to-teal-800 p-4 sm:p-6 md:p-8 text-white shadow-lg shadow-emerald-900/10">
         <div className="relative z-10 max-w-2xl space-y-2">
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/15 backdrop-blur-md text-xs font-semibold uppercase tracking-wider text-emerald-100">
             <Zap className="h-3.5 w-3.5 text-amber-300" />
@@ -76,11 +76,11 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigate }) => {
           <p className="text-emerald-100/90 text-sm sm:text-base leading-relaxed">
             内置统一高并发凭证中心与授权网关 (WXGate)，支持微信开放平台第三方免密代管托管、OIDC 邮箱自动绑定与 ChatGPT 大模型智能回复。
           </p>
-          <div className="pt-2 flex flex-wrap gap-3">
+          <div className="pt-2 flex flex-col sm:flex-row flex-wrap gap-2.5 sm:gap-3">
             <Button
               onClick={() => onNavigate('accounts')}
               variant="secondary"
-              className="font-semibold shadow-md bg-white text-emerald-800 hover:bg-emerald-50"
+              className="w-full sm:w-auto font-semibold shadow-md bg-white text-emerald-800 hover:bg-emerald-50 h-10 min-h-[40px]"
             >
               <Smartphone className="h-4 w-4 mr-1.5" />
               管理微信公众号
@@ -88,7 +88,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigate }) => {
             <Button
               onClick={() => onNavigate('miniprogram')}
               variant="outline"
-              className="border-white/40 text-white bg-white/10 hover:bg-white/20 font-medium"
+              className="w-full sm:w-auto border-white/40 text-white bg-white/10 hover:bg-white/20 font-medium h-10 min-h-[40px]"
             >
               <AppWindow className="h-4 w-4 mr-1.5 text-amber-300" />
               微信小程序快速注册
@@ -96,7 +96,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigate }) => {
             <Button
               onClick={() => onNavigate('wxgate')}
               variant="outline"
-              className="border-white/30 text-white hover:bg-white/10"
+              className="w-full sm:w-auto border-white/30 text-white hover:bg-white/10 h-10 min-h-[40px]"
             >
               微信网关与凭证中心
               <ArrowUpRight className="h-4 w-4 ml-1" />
@@ -106,7 +106,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigate }) => {
       </div>
 
       {/* 核心指标统计 */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 sm:gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">当前租户公众号</CardTitle>
@@ -162,7 +162,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigate }) => {
       </div>
 
       {/* 快捷配置指引与服务连通监控 */}
-      <div className="grid gap-6 lg:grid-cols-12 items-start">
+      <div className="grid gap-4 sm:gap-6 grid-cols-1 lg:grid-cols-12 items-start">
         {/* 左侧：当前公众号接入参数 */}
         <div className="lg:col-span-5">
           <Card>
@@ -186,7 +186,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigate }) => {
                       {(typeof window !== "undefined" && window.location.protocol === "https:" && (currentApp.callback_url || "").startsWith("http:")) ? currentApp.callback_url.replace(/^http:/, "https:") : (currentApp.callback_url || `/wxmp/${currentApp.appid}/handler`)}
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="p-3 rounded-lg bg-muted/60 space-y-1">
                       <div className="text-xs text-muted-foreground">令牌 (Token):</div>
                       <div className="font-mono text-xs font-semibold select-all">{currentApp.token || '未配置'}</div>
@@ -211,7 +211,7 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigate }) => {
         {/* 右侧：后端技术栈真实连通性与连接健康监控 (重点改进！) */}
         <div className="lg:col-span-7">
           <Card>
-            <CardHeader className="pb-3 flex flex-row items-center justify-between">
+            <CardHeader className="pb-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <div>
                 <CardTitle className="text-base flex items-center gap-2">
                   <Wifi className="h-5 w-5 text-emerald-600" />

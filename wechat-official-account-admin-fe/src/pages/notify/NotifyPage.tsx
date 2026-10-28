@@ -224,7 +224,7 @@ export const NotifyPage: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold tracking-tight flex items-center gap-2">
@@ -295,7 +295,7 @@ export const NotifyPage: React.FC = () => {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3 text-xs">
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <Input value={ind1} onChange={(e) => setInd1(e.target.value)} placeholder="一级行业代码 industry_id1" className="h-9 text-xs font-mono" />
                   <Input value={ind2} onChange={(e) => setInd2(e.target.value)} placeholder="二级行业代码 industry_id2" className="h-9 text-xs font-mono" />
                 </div>
@@ -670,7 +670,7 @@ export const NotifyPage: React.FC = () => {
                 <div className="font-mono text-[10.5px] text-muted-foreground break-all">{sendTmpl.template_id}</div>
                 <pre className="whitespace-pre-wrap text-[10.5px] max-h-24 overflow-auto">{sendTmpl.content}</pre>
               </div>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <Input value={sendToUser} onChange={(e) => setSendToUser(e.target.value)} placeholder="接收者 openid *" className="h-8 text-[11px] font-mono" />
                 <Input value={sendClientMsg} onChange={(e) => setSendClientMsg(e.target.value)} placeholder="client_msg_id (防重入，可选)" className="h-8 text-[11px] font-mono" />
                 <Input value={sendUrl} onChange={(e) => setSendUrl(e.target.value)} placeholder="点击跳转 url (可选)" className="h-8 text-[11px]" />
@@ -800,7 +800,7 @@ export const NotifyPage: React.FC = () => {
                 ))}
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <Input value={subToUser} onChange={(e) => setSubToUser(e.target.value)} placeholder="接收者 openid *" className="h-8 text-[11px] font-mono" />
                 <select value={subState} onChange={(e) => setSubState(e.target.value)} className="h-8 rounded-lg border border-input bg-background px-2 text-[11px]">
                   <option value="formal">formal 正式版</option>

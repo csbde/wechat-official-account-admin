@@ -469,7 +469,7 @@ export const CodeManagePanel: React.FC = () => {
                     ))}
                   </select>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-1">
                     <label className="font-semibold">代码版本号 *</label>
                     <Input value={userVersion} onChange={(e) => setUserVersion(e.target.value)} placeholder="如 1.0.0" className="h-9 text-xs font-mono" />

@@ -91,7 +91,7 @@ export const QrcodePage: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">带参二维码营销</h2>
@@ -100,7 +100,7 @@ export const QrcodePage: React.FC = () => {
           </p>
         </div>
 
-        <Button onClick={() => setDialogOpen(true)} className="gap-2 bg-emerald-600 hover:bg-emerald-700">
+        <Button onClick={() => setDialogOpen(true)} className="gap-2 bg-emerald-600 hover:bg-emerald-700 w-full sm:w-auto min-h-[38px] justify-center">
           <Plus className="h-4 w-4" />
           <span>生成带参二维码</span>
         </Button>
@@ -109,7 +109,7 @@ export const QrcodePage: React.FC = () => {
       {isLoading ? (
         <div className="py-12 text-center text-muted-foreground">加载二维码列表中...</div>
       ) : qrcodes?.list && qrcodes.list.length > 0 ? (
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="grid gap-3 sm:gap-4 md:gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {qrcodes.list.map((item: any) => {
             const isTemp = item.qrcode_type === 'temp'
             const imgSrc = `/api/qrcode/${item.id}/image`
@@ -194,7 +194,7 @@ export const QrcodePage: React.FC = () => {
           <div className="space-y-4 py-2 text-sm">
             <div className="space-y-1.5">
               <label className="text-xs font-semibold">二维码类型 *</label>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <Button
                   type="button"
                   variant={qrcodeType === 'temp' ? 'default' : 'outline'}

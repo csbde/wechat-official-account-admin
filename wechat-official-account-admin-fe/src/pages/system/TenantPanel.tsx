@@ -390,7 +390,7 @@ export const TenantPanel: React.FC = () => {
           </DialogHeader>
 
           <div data-tenant-dialog-body className="space-y-4 py-2 text-sm">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold">组织名称 *</label>
                 <Input

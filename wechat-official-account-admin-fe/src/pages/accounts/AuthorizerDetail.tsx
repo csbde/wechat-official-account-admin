@@ -84,7 +84,7 @@ export const AuthorizerDetailView: React.FC<{ detail: any; onClose: () => void }
       )}
 
       {/* 基本信息头部 */}
-      <div className="p-4 rounded-xl bg-muted/60 border flex items-start gap-4">
+      <div className="p-3 sm:p-4 rounded-xl bg-muted/60 border flex flex-col sm:flex-row items-start gap-3 sm:gap-4">
         <div className="h-16 w-16 rounded-2xl overflow-hidden shrink-0 border bg-background shadow-sm">
           {info.head_img ? (
             <img src={info.head_img} referrerPolicy="no-referrer" alt="" className="h-full w-full object-cover" />
@@ -124,7 +124,7 @@ export const AuthorizerDetailView: React.FC<{ detail: any; onClose: () => void }
       </div>
 
       {/* 认证与主体 */}
-      <div className="grid grid-cols-2 gap-2.5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
         <Cell label="认证主体 (principal_name)" value={info.principal_name || '个人 / 未认证主体'} />
         <Cell label="微信认证类型 (verify_type_info)" value={typeName(info.verify_type_info)} />
         <Cell label="账号类型 ID (service_type_info)" value={info.service_type_info?.id !== undefined ? `#${info.service_type_info.id}` : ''} />

@@ -63,8 +63,8 @@ export const LoginPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 text-foreground">
-      <div className="w-full max-w-md space-y-6">
+    <div className="min-h-screen flex items-center justify-center p-3 sm:p-4 bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 text-foreground pb-safe pt-safe">
+      <div className="w-full max-w-md space-y-4 sm:space-y-6 my-auto">
         {/* Logo 区域 */}
         <div className="text-center space-y-2">
           <div className="inline-flex h-14 w-14 rounded-2xl bg-gradient-to-tr from-emerald-500 to-green-400 items-center justify-center text-white shadow-xl shadow-emerald-500/30">
@@ -80,14 +80,14 @@ export const LoginPage: React.FC = () => {
 
         {/* 登录卡片 */}
         <Card className="border-border/60 bg-card/90 backdrop-blur-xl shadow-2xl">
-          <CardHeader className="space-y-1 pb-4">
+          <CardHeader className="space-y-1 p-4 sm:p-6 pb-2 sm:pb-4">
             <CardTitle className="text-xl">账号密码登录</CardTitle>
             <CardDescription className="text-xs">
               输入您的管理员用户名或邮箱直接登录系统
             </CardDescription>
           </CardHeader>
 
-          <CardContent>
+          <CardContent className="p-4 sm:p-6 pt-2 sm:pt-4">
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold flex items-center gap-1.5">
@@ -135,7 +135,7 @@ export const LoginPage: React.FC = () => {
             </form>
           </CardContent>
 
-          <CardFooter className="flex flex-col gap-3 pt-0 border-t border-border/40 mt-2">
+          <CardFooter className="flex flex-col gap-3 p-4 sm:p-6 pt-0 border-t border-border/40 mt-2">
             <div className="w-full flex items-center justify-center text-[11px] text-muted-foreground pt-3">
               <span>请使用管理员分配的账号登录；忘记密码或首次使用请联系平台超级管理员</span>
             </div>
@@ -147,7 +147,7 @@ export const LoginPage: React.FC = () => {
                 type="button"
                 onClick={handleOIDCLogin}
                 disabled={loadingOIDC}
-                className="w-full text-xs h-9 border-dashed border-emerald-500/50 hover:bg-emerald-500/10 gap-1.5 font-medium text-foreground"
+                className="w-full text-xs min-h-[40px] h-auto py-2 px-3 border-dashed border-emerald-500/50 hover:bg-emerald-500/10 gap-1.5 font-medium text-foreground whitespace-normal text-center"
               >
                 <Fingerprint className="h-4 w-4 text-emerald-500" />
                 <span>OIDC 企业单点登录 (自动按邮箱匹配绑定)</span>

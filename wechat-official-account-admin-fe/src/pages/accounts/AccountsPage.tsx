@@ -291,7 +291,7 @@ export const AccountsPage: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">微信公众号与开放平台管理</h2>
@@ -300,9 +300,9 @@ export const AccountsPage: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2 w-full sm:w-auto">
           {/* 微信开放平台第三方平台设置 */}
-          <Button variant="outline" onClick={handleOpenCompSettings} className="gap-1.5 text-xs">
+          <Button variant="outline" onClick={handleOpenCompSettings} className="gap-1.5 text-xs w-full sm:w-auto min-h-[38px] justify-center">
             <Layers className="h-4 w-4 text-emerald-600" />
             <span>开放平台第三方设置</span>
           </Button>
@@ -310,14 +310,14 @@ export const AccountsPage: React.FC = () => {
           {/* 微信官方扫码一键授权 */}
           <Button
             onClick={handleStartWeChatAuth}
-            className="gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm"
+            className="gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm w-full sm:w-auto min-h-[38px] justify-center"
           >
             <QrCode className="h-4 w-4" />
             <span>微信扫码一键授权接入</span>
           </Button>
 
           {/* 手动添加 */}
-          <Button variant="secondary" onClick={handleOpenCreate} className="gap-1.5 text-xs">
+          <Button variant="secondary" onClick={handleOpenCreate} className="gap-1.5 text-xs w-full sm:w-auto min-h-[38px] justify-center">
             <Plus className="h-4 w-4" />
             <span>手动添加公众号</span>
           </Button>
@@ -328,7 +328,7 @@ export const AccountsPage: React.FC = () => {
 
       {/* 开放平台第三方接入状态提示条 */}
       {openComp ? (
-        <div className="flex items-center justify-between p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-800 dark:text-emerald-300">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-800 dark:text-emerald-300">
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-4 w-4 text-emerald-600 shrink-0" />
             <span>
@@ -352,7 +352,7 @@ export const AccountsPage: React.FC = () => {
       {isLoading ? (
         <div className="py-12 text-center text-muted-foreground">正在加载公众号数据...</div>
       ) : accounts && accounts.length > 0 ? (
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-4 sm:gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
           {accounts.map((acc: any) => {
             const isSelected = currentApp?.id === acc.id
             const isAuthorized = acc.account_type === 'authorized'
@@ -439,8 +439,8 @@ export const AccountsPage: React.FC = () => {
                   </div>
 
                   {/* 底部操作条 */}
-                  <div className="pt-2 flex items-center justify-between border-t border-border/50">
-                    <div className="flex items-center gap-1">
+                  <div className="pt-2 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-t border-border/50">
+                    <div className="flex items-center gap-1 flex-wrap">
                       {(acc as any).tenant_missing && (
                         <Badge variant="destructive" className="text-[10px]">
                           租户记录缺失
@@ -471,7 +471,7 @@ export const AccountsPage: React.FC = () => {
                       )}
                     </div>
 
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1 flex-wrap">
                       {!acc.is_default && (
                         <Button
                           variant="ghost"
@@ -651,7 +651,7 @@ export const AccountsPage: React.FC = () => {
               <Input type="password" value={compSecret} onChange={(e) => setCompSecret(e.target.value)} placeholder="开放平台生成的 AppSecret" />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold">消息校验 Token *</label>
                 <Input value={compToken} onChange={(e) => setCompToken(e.target.value)} placeholder="与开放平台一致" />
@@ -720,7 +720,7 @@ export const AccountsPage: React.FC = () => {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
                 <label className="text-xs font-semibold">令牌 (Token)</label>
                 <Input placeholder="自定义字符串" {...form.register('token')} />

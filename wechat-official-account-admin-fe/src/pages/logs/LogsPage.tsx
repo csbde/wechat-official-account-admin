@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { useIsMobile } from '@/hooks/useIsMobile'
 import { useQuery } from '@tanstack/react-query'
 import { api, PageResult } from '@/lib/api'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
@@ -23,6 +24,7 @@ import { Search, Activity, Eye, Shield } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
 
 export const LogsPage: React.FC = () => {
+  const isMobile = useIsMobile()
   const [page, setPage] = useState(1)
   const [keyword, setKeyword] = useState('')
   const [status, setStatus] = useState('')
@@ -35,7 +37,7 @@ export const LogsPage: React.FC = () => {
   })
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl font-bold tracking-tight">请求与追踪审计日志</h2>
@@ -46,8 +48,8 @@ export const LogsPage: React.FC = () => {
       </div>
 
       {/* 过滤条 */}
-      <div className="flex flex-wrap items-center gap-3 p-4 bg-card rounded-xl border">
-        <div className="relative flex-1 min-w-[240px]">
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 p-3 sm:p-4 bg-card rounded-xl border">
+        <div className="relative flex-1 w-full sm:min-w-[240px]">
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
             value={keyword}
@@ -56,7 +58,7 @@ export const LogsPage: React.FC = () => {
               setPage(1)
             }}
             placeholder="搜索请求路径、Client IP 或 Trace ID..."
-            className="pl-9 text-xs h-9"
+            className="pl-9 text-xs h-9 w-full"
           />
         </div>
 
@@ -66,7 +68,7 @@ export const LogsPage: React.FC = () => {
             setStatus(e.target.value)
             setPage(1)
           }}
-          className="h-9 px-3 rounded-lg border border-input bg-background text-xs"
+          className="h-9 px-3 rounded-lg border border-input bg-background text-xs w-full sm:w-auto"
         >
           <option value="">全部状态码</option>
           <option value="200">200 OK</option>
@@ -77,78 +79,149 @@ export const LogsPage: React.FC = () => {
         </select>
       </div>
 
-      {/* 表格 */}
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>请求时间</TableHead>
-            <TableHead>Method & 状态</TableHead>
-            <TableHead>请求路径 (Path)</TableHead>
-            <TableHead>耗时 (Latency)</TableHead>
-            <TableHead>Trace ID / IP</TableHead>
-            <TableHead className="text-right">详情</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
+      {/* 审计日志列表：移动端卡片化，桌面端保持原表格 */}
+      {isMobile ? (
+        <div className="space-y-3">
           {isLoading ? (
-            <TableRow>
-              <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
-                加载日志中...
-              </TableCell>
-            </TableRow>
+            <div className="py-12 text-center text-muted-foreground text-xs bg-card rounded-xl border">
+              加载日志中...
+            </div>
           ) : pageResult?.list && pageResult.list.length > 0 ? (
             pageResult.list.map((log: any) => {
               const isSuccess = log.status_code >= 200 && log.status_code < 300
               return (
-                <TableRow key={log.id} className="text-xs">
-                  <TableCell className="text-muted-foreground whitespace-nowrap">
-                    {formatDate(log.created_at)}
-                  </TableCell>
-                  <TableCell>
+                <div key={log.id} className="p-3.5 rounded-xl border bg-card space-y-2 text-xs">
+                  {/* 顶部：Method、状态码、耗时、时间 */}
+                  <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-1.5 font-mono">
-                      <span className="font-bold text-[11px] uppercase">{log.method}</span>
+                      <span className="font-bold text-xs uppercase px-1.5 py-0.5 rounded bg-muted">
+                        {log.method}
+                      </span>
                       <Badge variant={isSuccess ? 'success' : 'destructive'} className="text-[10px]">
                         {log.status_code}
                       </Badge>
+                      <span
+                        className={`font-mono text-[11px] font-medium ${
+                          log.latency_ms > 500 ? 'text-amber-500' : 'text-emerald-600 dark:text-emerald-400'
+                        }`}
+                      >
+                        {log.latency_ms} ms
+                      </span>
                     </div>
-                  </TableCell>
-                  <TableCell className="font-mono truncate max-w-xs">{log.path}</TableCell>
-                  <TableCell>
-                    <span
-                      className={`font-mono font-medium ${
-                        log.latency_ms > 500 ? 'text-amber-500' : 'text-emerald-600 dark:text-emerald-400'
-                      }`}
-                    >
-                      {log.latency_ms} ms
+
+                    <span className="text-[11px] text-muted-foreground whitespace-nowrap">
+                      {formatDate(log.created_at)}
                     </span>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex flex-col text-[11px] font-mono text-muted-foreground">
-                      <span>{log.client_ip}</span>
-                      {log.trace_id && <span className="text-[10px] truncate max-w-[120px]">{log.trace_id}</span>}
+                  </div>
+
+                  {/* 路径 */}
+                  <div className="p-2 rounded-lg bg-muted/60 font-mono text-[11px] break-all text-foreground">
+                    {log.path}
+                  </div>
+
+                  {/* 底部：客户端 IP、Trace 与详情按钮 */}
+                  <div className="flex items-center justify-between pt-1 border-t border-border/50 text-[11px] text-muted-foreground font-mono">
+                    <div className="flex flex-col min-w-0 pr-2">
+                      <span className="truncate">IP: {log.client_ip}</span>
+                      {log.trace_id && (
+                        <span className="text-[10px] text-muted-foreground/80 truncate">
+                          Trace: {log.trace_id}
+                        </span>
+                      )}
                     </div>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button variant="ghost" size="icon" onClick={() => setViewLog(log)} className="h-7 w-7">
+
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setViewLog(log)}
+                      className="h-7 text-xs gap-1 shrink-0"
+                    >
                       <Eye className="h-3.5 w-3.5" />
+                      <span>详情</span>
                     </Button>
-                  </TableCell>
-                </TableRow>
+                  </div>
+                </div>
               )
             })
           ) : (
-            <TableRow>
-              <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
-                暂无审计日志
-              </TableCell>
-            </TableRow>
+            <div className="p-8 text-center text-muted-foreground text-xs bg-card rounded-xl border">
+              暂无审计日志
+            </div>
           )}
-        </TableBody>
-      </Table>
+        </div>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>请求时间</TableHead>
+              <TableHead>Method & 状态</TableHead>
+              <TableHead>请求路径 (Path)</TableHead>
+              <TableHead>耗时 (Latency)</TableHead>
+              <TableHead>Trace ID / IP</TableHead>
+              <TableHead className="text-right">详情</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {isLoading ? (
+              <TableRow>
+                <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
+                  加载日志中...
+                </TableCell>
+              </TableRow>
+            ) : pageResult?.list && pageResult.list.length > 0 ? (
+              pageResult.list.map((log: any) => {
+                const isSuccess = log.status_code >= 200 && log.status_code < 300
+                return (
+                  <TableRow key={log.id} className="text-xs">
+                    <TableCell className="text-muted-foreground whitespace-nowrap">
+                      {formatDate(log.created_at)}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1.5 font-mono">
+                        <span className="font-bold text-[11px] uppercase">{log.method}</span>
+                        <Badge variant={isSuccess ? 'success' : 'destructive'} className="text-[10px]">
+                          {log.status_code}
+                        </Badge>
+                      </div>
+                    </TableCell>
+                    <TableCell className="font-mono truncate max-w-xs">{log.path}</TableCell>
+                    <TableCell>
+                      <span
+                        className={`font-mono font-medium ${
+                          log.latency_ms > 500 ? 'text-amber-500' : 'text-emerald-600 dark:text-emerald-400'
+                        }`}
+                      >
+                        {log.latency_ms} ms
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-col text-[11px] font-mono text-muted-foreground">
+                        <span>{log.client_ip}</span>
+                        {log.trace_id && <span className="text-[10px] truncate max-w-[120px]">{log.trace_id}</span>}
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button variant="ghost" size="icon" onClick={() => setViewLog(log)} className="h-7 w-7">
+                        <Eye className="h-3.5 w-3.5" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                )
+              })
+            ) : (
+              <TableRow>
+                <TableCell colSpan={6} className="h-32 text-center text-muted-foreground">
+                  暂无审计日志
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      )}
 
       {/* 分页 */}
       {pageResult?.pagination && (
-        <div className="flex items-center justify-between text-xs text-muted-foreground pt-2">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-muted-foreground pt-2 border-t">
           <span>共 {pageResult.pagination.total} 条日志</span>
           <div className="flex items-center gap-2">
             <Button
