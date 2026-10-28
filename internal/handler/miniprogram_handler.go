@@ -174,11 +174,22 @@ func (h *MiniProgramHandler) GetFastRegisterAuthURL(c *gin.Context) {
 		}
 	}
 
-	// 校验公众号是否在当前租户并且为微信授权账号
+	// 校验公众号 (优先当前租户视角，超管视角或未指定租户时支持跨租户查找)
 	var account model.WxAccount
-	if err := database.DB.Where("app_id = ? AND tenant_id = ?", mpAppID, tenantID).First(&account).Error; err != nil {
-		Fail(c, http.StatusNotFound, "未找到该公众号或无权操作")
-		return
+	var err error
+	if SuperAdminHasFullCrossTenantAccess(c) {
+		err = database.DB.Where("app_id = ?", mpAppID).First(&account).Error
+	} else {
+		err = database.DB.Where("app_id = ? AND tenant_id = ?", mpAppID, tenantID).First(&account).Error
+	}
+	if err != nil {
+		// 容错兜底：若按当前 tenantID 未找到，但数据库中存在该已授权公众号，则自动对齐其所属租户
+		if fbErr := database.DB.Where("app_id = ?", mpAppID).First(&account).Error; fbErr == nil {
+			tenantID = account.TenantID
+		} else {
+			Fail(c, http.StatusNotFound, "未找到该公众号或无权操作")
+			return
+		}
 	}
 
 	redirectURI := c.Query("redirect_uri")
@@ -212,11 +223,21 @@ func (h *MiniProgramHandler) FastRegisterByOfficialAccount(c *gin.Context) {
 	req.MpAppID = strings.TrimSpace(req.MpAppID)
 	req.Ticket = strings.TrimSpace(req.Ticket)
 
-	// 查找公众号
+	// 查找公众号 (优先当前租户，兜底对齐其归属租户)
 	var account model.WxAccount
-	if err := database.DB.Where("app_id = ? AND tenant_id = ?", req.MpAppID, tenantID).First(&account).Error; err != nil {
-		Fail(c, http.StatusNotFound, "未找到该公众号或无权操作")
-		return
+	var err error
+	if SuperAdminHasFullCrossTenantAccess(c) {
+		err = database.DB.Where("app_id = ?", req.MpAppID).First(&account).Error
+	} else {
+		err = database.DB.Where("app_id = ? AND tenant_id = ?", req.MpAppID, tenantID).First(&account).Error
+	}
+	if err != nil {
+		if fbErr := database.DB.Where("app_id = ?", req.MpAppID).First(&account).Error; fbErr == nil {
+			tenantID = account.TenantID
+		} else {
+			Fail(c, http.StatusNotFound, "未找到该公众号或无权操作")
+			return
+		}
 	}
 
 	// 查找第三方平台
