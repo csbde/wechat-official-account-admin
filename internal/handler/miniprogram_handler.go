@@ -153,6 +153,138 @@ func (h *MiniProgramHandler) RefreshTask(c *gin.Context) {
 	Ok(c, task)
 }
 
+// GetFastRegisterAuthURL 获取复用公众号主体快速注册小程序的微信扫码授权链接
+func (h *MiniProgramHandler) GetFastRegisterAuthURL(c *gin.Context) {
+	tenantID := GetTenantID(c)
+	mpAppID := strings.TrimSpace(c.Query("mp_appid"))
+	if mpAppID == "" {
+		Fail(c, http.StatusBadRequest, "请选择已授权的公众号 (mp_appid 不能为空)")
+		return
+	}
+
+	copyWxVerifyStr := c.DefaultQuery("copy_wx_verify", "1")
+	copyWxVerify := copyWxVerifyStr == "1" || copyWxVerifyStr == "true"
+
+	// 查找当前租户或系统启用的第三方平台
+	var comp model.WxOpenComponent
+	if err := database.DB.Where("tenant_id = ? AND enabled = ?", tenantID, true).First(&comp).Error; err != nil {
+		if err := database.DB.Where("enabled = ?", true).Order("id desc").First(&comp).Error; err != nil {
+			Fail(c, http.StatusBadRequest, "尚未配置微信开放平台第三方平台凭据，请先在开放平台设置中配置")
+			return
+		}
+	}
+
+	// 校验公众号是否在当前租户并且为微信授权账号
+	var account model.WxAccount
+	if err := database.DB.Where("app_id = ? AND tenant_id = ?", mpAppID, tenantID).First(&account).Error; err != nil {
+		Fail(c, http.StatusNotFound, "未找到该公众号或无权操作")
+		return
+	}
+
+	redirectURI := c.Query("redirect_uri")
+	if redirectURI == "" {
+		redirectURI = BuildPublicURL(c, fmt.Sprintf("/api/open/auth-callback?tenant_id=%d&from=fastregister_mp&mp_appid=%s", tenantID, mpAppID))
+	}
+
+	authURL := service.DefaultWxMiniService.BuildFastRegisterOfficialAuthURL(comp.ComponentAppID, mpAppID, redirectURI, copyWxVerify)
+
+	Ok(c, gin.H{
+		"auth_url":        authURL,
+		"component_appid": comp.ComponentAppID,
+		"mp_appid":        mpAppID,
+		"mp_name":         account.Name,
+		"copy_wx_verify":  copyWxVerify,
+	})
+}
+
+// FastRegisterByOfficialAccount 通过 ticket 直接调用微信接口创建小程序 (复用公众号主体资质)
+func (h *MiniProgramHandler) FastRegisterByOfficialAccount(c *gin.Context) {
+	tenantID := GetTenantID(c)
+	var req struct {
+		MpAppID string `json:"mp_appid" binding:"required"`
+		Ticket  string `json:"ticket" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		Fail(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	req.MpAppID = strings.TrimSpace(req.MpAppID)
+	req.Ticket = strings.TrimSpace(req.Ticket)
+
+	// 查找公众号
+	var account model.WxAccount
+	if err := database.DB.Where("app_id = ? AND tenant_id = ?", req.MpAppID, tenantID).First(&account).Error; err != nil {
+		Fail(c, http.StatusNotFound, "未找到该公众号或无权操作")
+		return
+	}
+
+	// 查找第三方平台
+	var comp model.WxOpenComponent
+	if err := database.DB.Where("tenant_id = ? AND enabled = ?", tenantID, true).First(&comp).Error; err != nil {
+		if err := database.DB.Where("enabled = ?", true).Order("id desc").First(&comp).Error; err != nil {
+			Fail(c, http.StatusBadRequest, "尚未配置微信开放平台第三方平台凭据")
+			return
+		}
+	}
+
+	// 调用微信官方复用主体注册接口
+	res, err := service.DefaultWxMiniService.FastRegisterByOfficialAccount(c.Request.Context(), req.MpAppID, req.Ticket)
+	if err != nil {
+		Fail(c, http.StatusInternalServerError, "微信接口返回错误: "+err.Error())
+		return
+	}
+
+	// 存入任务追踪记录
+	task := model.WxMiniRegisterTask{
+		TenantID:       tenantID,
+		RegisterType:   "official_account",
+		MpAppID:        req.MpAppID,
+		MpName:         account.Name,
+		Ticket:         req.Ticket,
+		AuthCode:       res.AuthorizationCode,
+		IsWxVerifySucc: res.IsWxVerifySucc,
+		IsLinkSucc:     res.IsLinkSucc,
+		Name:           account.Name,
+		Status:         1,
+		StatusDesc:     "复用公众号主体创建成功",
+		AppID:          res.AppID,
+	}
+	database.DB.Create(&task)
+
+	// 使用 authorization_code 自动将新生成的小程序接入系统托管
+	if res.AuthorizationCode != "" {
+		miniAccount, authErr := service.DefaultWxOpenService.QueryAuth(c.Request.Context(), comp.ComponentAppID, res.AuthorizationCode, tenantID)
+		if authErr == nil && miniAccount != nil {
+			miniAccount.AccountType = "miniprogram"
+			database.DB.Save(miniAccount)
+		}
+	} else if res.AppID != "" {
+		// 备用兜底存入账号表
+		var miniAcc model.WxAccount
+		if err := database.DB.Where("app_id = ? AND tenant_id = ?", res.AppID, tenantID).First(&miniAcc).Error; err != nil {
+			miniAcc = model.WxAccount{
+				TenantID:       tenantID,
+				Name:           account.Name + " (小程序)",
+				AppID:          res.AppID,
+				AccountType:    "miniprogram",
+				ComponentAppID: comp.ComponentAppID,
+				Enabled:        true,
+				Description:    fmt.Sprintf("复用公众号【%s】主体快速注册开通", account.Name),
+			}
+			database.DB.Create(&miniAcc)
+		}
+	}
+
+	Ok(c, gin.H{
+		"task":               task,
+		"appid":              res.AppID,
+		"authorization_code": res.AuthorizationCode,
+		"is_wx_verify_succ":  res.IsWxVerifySucc,
+		"is_link_succ":       res.IsLinkSucc,
+	})
+}
+
 // GetDomain 获取小程序合法服务器域名配置
 func (h *MiniProgramHandler) GetDomain(c *gin.Context) {
 	appid := GetAppID(c)

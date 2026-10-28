@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/anchel/wechat-official-account-admin/internal/cache"
@@ -29,8 +31,14 @@ type FastRegisterParam struct {
 	ComponentPhone     string `json:"component_phone"`      // 第三方联系电话
 }
 
-// CreateFastRegisterTask 提交快速注册小程序任务 (免 300 元认证费)
+// CreateFastRegisterTask 提交快速注册小程序任务 (免 300 元认证费，企业法人人脸核身方式)
 func (s *WxMiniService) CreateFastRegisterTask(ctx context.Context, componentAppID string, p FastRegisterParam) error {
+	p.Name = strings.TrimSpace(p.Name)
+	p.Code = strings.ToUpper(strings.TrimSpace(p.Code))
+	p.LegalPersonaWechat = strings.TrimSpace(p.LegalPersonaWechat)
+	p.LegalPersonaName = strings.TrimSpace(p.LegalPersonaName)
+	p.ComponentPhone = strings.TrimSpace(p.ComponentPhone)
+
 	compToken, err := DefaultWxOpenService.GetComponentAccessToken(ctx, componentAppID)
 	if err != nil {
 		return fmt.Errorf("获取 component_access_token 失败: %w", err)
@@ -42,6 +50,13 @@ func (s *WxMiniService) CreateFastRegisterTask(ctx context.Context, componentApp
 		return fmt.Errorf("调用微信快速注册接口失败: %w", err)
 	}
 
+	logger.Info("[快速注册小程序] 微信返回结果",
+		zap.String("status", resp.Status()),
+		zap.String("body", string(resp.Body())),
+		zap.String("enterprise", p.Name),
+		zap.String("legal_wechat", p.LegalPersonaWechat),
+	)
+
 	var res struct {
 		Errcode int    `json:"errcode"`
 		Errmsg  string `json:"errmsg"`
@@ -50,11 +65,88 @@ func (s *WxMiniService) CreateFastRegisterTask(ctx context.Context, componentApp
 		return fmt.Errorf("解析响应失败: %w", err)
 	}
 	if res.Errcode != 0 {
+		if res.Errcode == -1 {
+			return fmt.Errorf("微信接口返回 [-1] 系统繁忙 (system error) — 请检查开放平台控制台是否已添加并全网发布小程序开发/认证相关权限集，并确认法人姓名、微信号与企业统一信用代码完全无误")
+		}
 		return FriendlyWxError(fmt.Errorf("[%d] %s", res.Errcode, res.Errmsg))
 	}
 
 	logger.Info("[快速注册小程序] 任务已成功提交至微信服务器", zap.String("enterprise", p.Name), zap.String("legal_wechat", p.LegalPersonaWechat))
 	return nil
+}
+
+// FastRegisterByOfficialAccountResult 复用公众号主体快速注册小程序接口返回
+type FastRegisterByOfficialAccountResult struct {
+	AppID             string `json:"appid"`              // 新创建小程序的 appid
+	AuthorizationCode string `json:"authorization_code"` // 新创建小程序的授权码 (用于换取 refresh_token 落库)
+	IsWxVerifySucc    bool   `json:"is_wx_verify_succ"`  // 复用公众号微信认证是否成功
+	IsLinkSucc        bool   `json:"is_link_succ"`       // 小程序是否和公众号关联成功
+}
+
+// BuildFastRegisterOfficialAuthURL 构建复用公众号主体快速注册小程序的微信扫码授权链接
+// 用户点击或公众号管理员扫码该链接即可完成授权确认并回跳第三方平台
+func (s *WxMiniService) BuildFastRegisterOfficialAuthURL(componentAppID, mpAppID, redirectURI string, copyWxVerify bool) string {
+	copyVal := "1"
+	if !copyWxVerify {
+		copyVal = "0"
+	}
+	encodedRedirect := url.QueryEscape(redirectURI)
+	return fmt.Sprintf(
+		"https://mp.weixin.qq.com/cgi-bin/fastregisterauth?appid=%s&component_appid=%s&copy_wx_verify=%s&redirect_uri=%s",
+		mpAppID, componentAppID, copyVal, encodedRedirect,
+	)
+}
+
+// FastRegisterByOfficialAccount 复用公众号主体快速注册小程序
+// 微信接口文档: POST https://api.weixin.qq.com/cgi-bin/account/fastregister?access_token=TOKEN
+func (s *WxMiniService) FastRegisterByOfficialAccount(ctx context.Context, mpAppID, ticket string) (*FastRegisterByOfficialAccountResult, error) {
+	ticket = strings.TrimSpace(ticket)
+	if ticket == "" {
+		return nil, fmt.Errorf("ticket 不能为空")
+	}
+
+	wxClient, err := NewWxClient(mpAppID)
+	if err != nil {
+		return nil, fmt.Errorf("初始化公众号客户端失败: %w", err)
+	}
+	authorizerToken, err := wxClient.GetAccessToken(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("获取公众号 authorizer_access_token 失败: %w", err)
+	}
+
+	apiURL := fmt.Sprintf("https://api.weixin.qq.com/cgi-bin/account/fastregister?access_token=%s", authorizerToken)
+	resp, err := s.http.R().SetContext(ctx).SetBody(map[string]string{
+		"ticket": ticket,
+	}).Post(apiURL)
+
+	if err != nil {
+		return nil, fmt.Errorf("调用复用公众号快速注册接口失败: %w", err)
+	}
+
+	logger.Info("[复用公众号注册小程序] 微信响应", zap.String("body", string(resp.Body())), zap.String("mp_appid", mpAppID))
+
+	var res struct {
+		Errcode           int    `json:"errcode"`
+		Errmsg            string `json:"errmsg"`
+		AppID             string `json:"appid"`
+		AuthorizationCode string `json:"authorization_code"`
+		IsWxVerifySucc    bool   `json:"is_wx_verify_succ"`
+		IsLinkSucc        bool   `json:"is_link_succ"`
+	}
+	if err := json.Unmarshal(resp.Body(), &res); err != nil {
+		return nil, fmt.Errorf("解析微信响应失败: %w", err)
+	}
+
+	if res.Errcode != 0 {
+		return nil, FriendlyWxError(fmt.Errorf("[%d] %s", res.Errcode, res.Errmsg))
+	}
+
+	return &FastRegisterByOfficialAccountResult{
+		AppID:             res.AppID,
+		AuthorizationCode: res.AuthorizationCode,
+		IsWxVerifySucc:    res.IsWxVerifySucc,
+		IsLinkSucc:        res.IsLinkSucc,
+	}, nil
 }
 
 type FastRegisterSearchResult struct {

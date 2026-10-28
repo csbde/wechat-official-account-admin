@@ -137,6 +137,8 @@ func (h *OpenComponentHandler) GetAuthURL(c *gin.Context) {
 
 // AuthCallback 处理微信扫码授权回调 (公开端点，由微信浏览器 302 重定向直连访问)
 func (h *OpenComponentHandler) AuthCallback(c *gin.Context) {
+	ticket := c.Query("ticket")
+	mpAppID := c.Query("mp_appid")
 	authCode := c.Query("auth_code")
 	if authCode == "" {
 		authCode = c.Query("authorization_code")
@@ -149,6 +151,12 @@ func (h *OpenComponentHandler) AuthCallback(c *gin.Context) {
 		if _, err := fmt.Sscanf(tenantIDStr, "%d", &tid); err == nil && tid > 0 {
 			tenantID = uint(tid)
 		}
+	}
+
+	// 1. 特殊流程：复用公众号主体快速注册小程序扫码回跳 (携带 ticket)
+	if ticket != "" && mpAppID != "" {
+		h.handleFastRegisterTicketCallback(c, tenantID, mpAppID, ticket)
+		return
 	}
 
 	// 查找当前租户或系统启用的第三方平台
@@ -446,4 +454,162 @@ func (h *OpenComponentHandler) ManualSetTicket(c *gin.Context) {
 		"verify_ticket":     req.Ticket,
 		"ticket_updated_at": now,
 	})
+}
+
+// handleFastRegisterTicketCallback 处理复用公众号主体快速注册小程序扫码授权回跳
+func (h *OpenComponentHandler) handleFastRegisterTicketCallback(c *gin.Context, tenantID uint, mpAppID, ticket string) {
+	// 查找第三方平台
+	var comp model.WxOpenComponent
+	err := database.DB.Where("tenant_id = ? AND enabled = ?", tenantID, true).First(&comp).Error
+	if err != nil {
+		err = database.DB.Where("enabled = ?", true).Order("id desc").First(&comp).Error
+	}
+	if err != nil {
+		c.String(http.StatusBadRequest, "第三方平台未配置或已禁用")
+		return
+	}
+
+	var account model.WxAccount
+	database.DB.Where("app_id = ? AND tenant_id = ?", mpAppID, tenantID).First(&account)
+	mpName := account.Name
+	if mpName == "" {
+		mpName = mpAppID
+	}
+
+	// 调用微信官方复用接口创建小程序
+	res, err := service.DefaultWxMiniService.FastRegisterByOfficialAccount(c.Request.Context(), mpAppID, ticket)
+	if err != nil {
+		logger.Error("[复用公众号注册小程序回调] 创建失败", zap.Error(err), zap.String("mp_appid", mpAppID))
+		c.Header("Content-Type", "text/html; charset=utf-8")
+		c.String(http.StatusOK, fmt.Sprintf(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>小程序注册失败</title><style>body{font-family:sans-serif;text-align:center;padding:50px;background:#0f172a;color:#fff;}.card{background:#1e293b;max-width:460px;margin:0 auto;padding:36px;border-radius:18px;}.err{color:#f87171;font-size:18px;margin-bottom:12px;}</style></head>
+<body><div class="card"><div class="err">⚠️ 小程序创建失败</div><p>%s</p><p style="color:#94a3b8;font-size:13px;">请返回系统「微信小程序」页面重试。</p></div></body></html>`, err.Error()))
+		return
+	}
+
+	// 存入任务追踪记录
+	task := model.WxMiniRegisterTask{
+		TenantID:       tenantID,
+		RegisterType:   "official_account",
+		MpAppID:        mpAppID,
+		MpName:         mpName,
+		Ticket:         ticket,
+		AuthCode:       res.AuthorizationCode,
+		IsWxVerifySucc: res.IsWxVerifySucc,
+		IsLinkSucc:     res.IsLinkSucc,
+		Name:           mpName,
+		Status:         1,
+		StatusDesc:     "复用公众号主体创建成功",
+		AppID:          res.AppID,
+	}
+	database.DB.Create(&task)
+
+	// 使用 authorization_code 自动将新生成的小程序接入系统托管
+	if res.AuthorizationCode != "" {
+		miniAccount, authErr := service.DefaultWxOpenService.QueryAuth(c.Request.Context(), comp.ComponentAppID, res.AuthorizationCode, tenantID)
+		if authErr == nil && miniAccount != nil {
+			miniAccount.AccountType = "miniprogram"
+			database.DB.Save(miniAccount)
+		}
+	} else if res.AppID != "" {
+		var miniAcc model.WxAccount
+		if dbErr := database.DB.Where("app_id = ? AND tenant_id = ?", res.AppID, tenantID).First(&miniAcc).Error; dbErr != nil {
+			miniAcc = model.WxAccount{
+				TenantID:       tenantID,
+				Name:           mpName + " (小程序)",
+				AppID:          res.AppID,
+				AccountType:    "miniprogram",
+				ComponentAppID: comp.ComponentAppID,
+				Enabled:        true,
+				Description:    fmt.Sprintf("复用公众号【%s】主体快速注册开通", mpName),
+			}
+			database.DB.Create(&miniAcc)
+		}
+	}
+
+	// 渲染极速成功的反馈页
+	successHTML := fmt.Sprintf(`<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>小程序快速注册成功</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif;
+      background: linear-gradient(135deg, #064e3b 0%, #0f172a 100%);
+      color: #fff; min-height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .card {
+      background: rgba(30, 41, 59, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      backdrop-filter: blur(20px);
+      border-radius: 24px;
+      padding: 44px 32px;
+      text-align: center;
+      max-width: 440px;
+      width: 90%;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    }
+    .icon-box {
+      width: 68px; height: 68px;
+      margin: 0 auto 20px;
+      border-radius: 50%;
+      background: rgba(16, 185, 129, 0.2);
+      border: 2px solid rgba(16, 185, 129, 0.4);
+      display: flex; align-items: center; justify-content: center;
+      color: #10b981; font-size: 34px; font-weight: bold;
+    }
+    h2 { margin: 0 0 10px; font-size: 22px; font-weight: 700; }
+    .badge {
+      display: inline-block;
+      padding: 6px 16px;
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.35);
+      color: #34d399;
+      border-radius: 999px;
+      font-size: 13px; font-weight: 600;
+      margin-bottom: 20px;
+    }
+    p { margin: 0 0 20px; font-size: 13.5px; color: #94a3b8; line-height: 1.6; }
+    .code-box {
+      background: rgba(15, 23, 42, 0.7);
+      padding: 12px;
+      border-radius: 10px;
+      font-family: monospace;
+      font-size: 13px;
+      color: #38bdf8;
+      margin-bottom: 24px;
+      word-break: break-all;
+    }
+    .btn {
+      display: block; width: 100%;
+      padding: 13px 0;
+      border-radius: 12px;
+      background: #059669;
+      color: #fff;
+      text-decoration: none;
+      font-size: 14.5px; font-weight: 600;
+      transition: background 0.2s;
+    }
+    .btn:hover { background: #047857; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon-box">✓</div>
+    <h2>小程序创建并接入成功</h2>
+    <div class="badge">已复用公众号主体资质并免认证费</div>
+    <div class="code-box">新小程序 AppID: %s</div>
+    <p>该小程序已自动关联至公众号【%s】，并已完成系统授权托管，可直接进入系统开始代码上传与发布！</p>
+    <a href="/#/miniprogram" class="btn">返回系统控制台</a>
+  </div>
+</body>
+</html>`, res.AppID, mpName)
+
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	c.String(http.StatusOK, successHTML)
 }

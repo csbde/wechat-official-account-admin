@@ -280,11 +280,18 @@ type SystemOIDCSetting struct {
 type WxMiniRegisterTask struct {
 	ID                 uint           `gorm:"primaryKey" json:"id"`
 	TenantID           uint           `gorm:"index;not null;default:1" json:"tenant_id"`    // 租户隔离
-	Name               string         `gorm:"size:128;not null" json:"name"`                // 企业名称（需与营业执照一致）
-	Code               string         `gorm:"size:64;not null" json:"code"`                 // 企业代码 (统一社会信用代码)
+	RegisterType       string         `gorm:"size:32;default:'enterprise'" json:"register_type"` // enterprise: 企业法人人脸, official_account: 复用公众号主体
+	MpAppID            string         `gorm:"size:64" json:"mp_appid,omitempty"`            // 复用主体的公众号 AppID
+	MpName             string         `gorm:"size:128" json:"mp_name,omitempty"`            // 复用主体的公众号名称
+	Ticket             string         `gorm:"size:128" json:"ticket,omitempty"`             // 微信扫码回跳携带的凭据 ticket
+	AuthCode           string         `gorm:"size:128" json:"auth_code,omitempty"`          // 新小程序的授权码 authorization_code
+	IsWxVerifySucc     bool           `gorm:"default:false" json:"is_wx_verify_succ"`       // 是否复用公众号资质微信认证成功
+	IsLinkSucc         bool           `gorm:"default:false" json:"is_link_succ"`            // 是否自动关联公众号成功
+	Name               string         `gorm:"size:128" json:"name"`                         // 企业名称（需与营业执照一致）
+	Code               string         `gorm:"size:64" json:"code"`                          // 企业代码 (统一社会信用代码)
 	CodeType           int            `gorm:"default:1" json:"code_type"`                   // 1: 统一社会信用代码, 2: 组织机构代码, 3: 营业执照注册号
-	LegalPersonaWechat string         `gorm:"size:64;not null" json:"legal_persona_wechat"` // 法人微信号
-	LegalPersonaName   string         `gorm:"size:64;not null" json:"legal_persona_name"`   // 法人姓名
+	LegalPersonaWechat string         `gorm:"size:64" json:"legal_persona_wechat"`          // 法人微信号
+	LegalPersonaName   string         `gorm:"size:64" json:"legal_persona_name"`            // 法人姓名
 	ComponentPhone     string         `gorm:"size:32" json:"component_phone"`               // 第三方平台联系电话
 	Status             int            `gorm:"default:0" json:"status"`                      // 0: 待法人人脸核身, 1: 注册成功, 2: 微信驳回
 	StatusDesc         string         `gorm:"size:255" json:"status_desc"`                  // 状态说明文本

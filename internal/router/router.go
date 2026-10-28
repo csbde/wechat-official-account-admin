@@ -191,6 +191,8 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 		protected.GET("/miniprogram/tasks", miniHandler.ListTasks)
 		protected.POST("/miniprogram/tasks", miniHandler.CreateTask)
 		protected.POST("/miniprogram/tasks/:id/refresh", miniHandler.RefreshTask)
+		protected.GET("/miniprogram/fast-register/auth-url", miniHandler.GetFastRegisterAuthURL)
+		protected.POST("/miniprogram/fast-register/by-official-account", miniHandler.FastRegisterByOfficialAccount)
 		protected.GET("/miniprogram/drafts", miniHandler.GetTemplateDrafts)
 		protected.GET("/miniprogram/templates", miniHandler.GetTemplates)
 		protected.POST("/miniprogram/templates/add-from-draft", miniHandler.AddTemplateFromDraft)
