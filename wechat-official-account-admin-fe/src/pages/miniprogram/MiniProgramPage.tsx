@@ -1105,11 +1105,14 @@ export const MiniProgramPage: React.FC = () => {
                   className="w-full h-9 rounded-lg border border-input bg-background px-2.5 text-xs text-foreground"
                 >
                   <option value="">-- 请选择公众号 --</option>
-                  {officialAccounts.map((acc: any) => (
-                    <option key={acc.app_id} value={acc.app_id}>
-                      {acc.name} ({acc.app_id})
-                    </option>
-                  ))}
+                  {officialAccounts.map((acc: any) => {
+                    const id = acc.appid || acc.app_id
+                    return (
+                      <option key={id} value={id}>
+                        {acc.name} ({id})
+                      </option>
+                    )
+                  })}
                 </select>
                 {officialAccounts.length === 0 && (
                   <p className="text-[11px] text-amber-600">

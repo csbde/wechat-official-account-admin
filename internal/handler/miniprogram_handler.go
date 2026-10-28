@@ -158,7 +158,10 @@ func (h *MiniProgramHandler) GetFastRegisterAuthURL(c *gin.Context) {
 	tenantID := GetTenantID(c)
 	mpAppID := strings.TrimSpace(c.Query("mp_appid"))
 	if mpAppID == "" {
-		Fail(c, http.StatusBadRequest, "请选择已授权的公众号 (mp_appid 不能为空)")
+		mpAppID = strings.TrimSpace(c.Query("appid"))
+	}
+	if mpAppID == "" || mpAppID == "undefined" || mpAppID == "null" {
+		Fail(c, http.StatusBadRequest, "请选择已授权托管的公众号 (mp_appid 不能为空)")
 		return
 	}
 
@@ -222,6 +225,10 @@ func (h *MiniProgramHandler) FastRegisterByOfficialAccount(c *gin.Context) {
 
 	req.MpAppID = strings.TrimSpace(req.MpAppID)
 	req.Ticket = strings.TrimSpace(req.Ticket)
+	if req.MpAppID == "" || req.MpAppID == "undefined" || req.MpAppID == "null" {
+		Fail(c, http.StatusBadRequest, "请选择已授权托管的公众号 (mp_appid 不能为空)")
+		return
+	}
 
 	// 查找公众号 (优先当前租户，兜底对齐其归属租户)
 	var account model.WxAccount
