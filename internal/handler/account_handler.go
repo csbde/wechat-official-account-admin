@@ -371,6 +371,15 @@ func (h *AccountHandler) GetAuthorizerDetail(c *gin.Context) {
 			if v, ok := updates["func_info"]; ok {
 				account.FuncInfo = v.(string)
 			}
+			if v, ok := updates["service_type"]; ok {
+				account.ServiceType = v.(int)
+			}
+			if v, ok := updates["verify_type"]; ok {
+				account.VerifyType = v.(int)
+			}
+			if v, ok := updates["app_type"]; ok {
+				account.AppType = v.(string)
+			}
 		}
 
 		liveFuncInfo := make([]service.AuthorizerFuncInfo, len(detail.AuthorizationInfo.FuncInfo))

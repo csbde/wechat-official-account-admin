@@ -422,7 +422,7 @@ export const AccountsPage: React.FC = () => {
             const isAuthorized = acc.account_type === 'authorized'
             const isMini = acc.app_type === 'miniprogram' || acc.account_type === 'miniprogram'
             const isSub = acc.app_type === 'subscription' || acc.service_type === 0 || acc.service_type === 1
-            const isVerified = acc.verify_type === 0
+            const isVerified = acc.verify_type !== undefined && acc.verify_type >= 0
 
             return (
               <Card
