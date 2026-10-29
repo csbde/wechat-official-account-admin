@@ -18,6 +18,15 @@ import {
   CheckCircle2,
   Laptop,
   Compass,
+  QrCode,
+  Smartphone,
+  RefreshCw,
+  ShieldAlert,
+  ShieldCheck,
+  Check,
+  User,
+  HeartPulse,
+  ExternalLink,
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -46,6 +55,16 @@ export const WxGatePage: React.FC = () => {
 
   const [targetRedirect, setTargetRedirect] = useState(initialRedirect)
   const [authScope, setAuthScope] = useState('snsapi_userinfo')
+
+  // 扫码调试模式: 是否使用内置沙箱回显
+  const [useDebugEcho, setUseDebugEcho] = useState(true)
+  const [debugSessionId, setDebugSessionId] = useState('')
+  const [scannedUser, setScannedUser] = useState<any>(null)
+  const [isPolling, setIsPolling] = useState(false)
+
+  // 健康诊断
+  const [diagnoseLoading, setDiagnoseLoading] = useState(false)
+  const [diagnoseResult, setDiagnoseResult] = useState<any>(null)
 
   // 获取网关运行统计与监控
   const { data: gateStats } = useQuery<any>({
@@ -85,11 +104,54 @@ export const WxGatePage: React.FC = () => {
 
   // 动态生成 OAuth2 授权中转链接 (自适应当前网关域名)
   const gatewayBase = typeof window !== 'undefined' ? window.location.origin : 'https://your-gateway.com'
+  const effectiveRedirect = useDebugEcho
+    ? `${gatewayBase}/oauth/debug`
+    : targetRedirect
+
   const generatedOAuthURL = currentApp
     ? `${gatewayBase}/connect/oauth2/authorize?appid=${currentApp.appid}&redirect_uri=${encodeURIComponent(
-        targetRedirect
+        effectiveRedirect
       )}&response_type=code&scope=${authScope}&state=STATE#wechat_redirect`
     : '请先在顶部选择一个微信公众号'
+
+  // 二维码图片链接
+  const oauthQRCodeURL = currentApp
+    ? `/api/wxgate/qrcode?text=${encodeURIComponent(generatedOAuthURL)}`
+    : ''
+
+  // 轮询检查扫码登录测试结果
+  useEffect(() => {
+    let timer: any = null
+    if (isPolling) {
+      timer = setInterval(async () => {
+        try {
+          const res: any = await api.get('/api/wxgate/stats')
+          // 从网关最近完成的会话或通过 session 匹配获取
+        } catch (e) {}
+      }, 2000)
+    }
+    return () => {
+      if (timer) clearInterval(timer)
+    }
+  }, [isPolling])
+
+  // 执行接口与白名单体检
+  const handleDiagnose = async () => {
+    if (!currentApp) {
+      toast.error('请先选择一个公众号')
+      return
+    }
+    try {
+      setDiagnoseLoading(true)
+      const res: any = await api.get(`/api/wxgate/diagnose?appid=${currentApp.appid}`)
+      setDiagnoseResult(res?.data || res)
+      toast.success('体检诊断完成！')
+    } catch (e: any) {
+      toast.error(e.message || '体检诊断失败')
+    } finally {
+      setDiagnoseLoading(false)
+    }
+  }
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -285,6 +347,51 @@ export const WxGatePage: React.FC = () => {
               </div>
             </div>
 
+            {/* 📱 微信扫码授权真机测试沙箱 (核心亮点功能) */}
+            {currentApp && (
+              <div className="p-3.5 rounded-xl border bg-card space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="font-semibold text-foreground flex items-center gap-1.5">
+                    <QrCode className="h-4 w-4 text-emerald-600" />
+                    <span>手机微信扫码直测 (获取当前微信信息):</span>
+                  </div>
+                  <Badge variant="outline" className="text-[10px] text-emerald-600 border-emerald-500/30">
+                    无需自建页面
+                  </Badge>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-center gap-4 bg-muted/40 p-3 rounded-lg">
+                  <div className="relative h-32 w-32 shrink-0 bg-background rounded-lg border p-1 shadow-sm flex items-center justify-center">
+                    <img
+                      src={oauthQRCodeURL}
+                      alt="OAuth QR Code"
+                      className="h-full w-full object-contain"
+                    />
+                  </div>
+                  <div className="space-y-1.5 text-[11px] leading-relaxed">
+                    <div className="font-semibold text-foreground flex items-center gap-1">
+                      <Smartphone className="h-3.5 w-3.5 text-primary" />
+                      <span>使用微信 App 扫描左侧二维码</span>
+                    </div>
+                    <p className="text-muted-foreground">
+                      授权完成后将重定向到回调地址。若使用沙箱回显，请在微信中确认授权后，页面会直接展示您的 <code>OpenID</code>、<code>Nickname</code>、<code>头像</code> 与 <code>UnionID</code>。
+                    </p>
+                    <div className="pt-1 flex flex-wrap gap-2">
+                      <a
+                        href={generatedOAuthURL}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-primary hover:underline font-semibold"
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                        <span>电脑端在浏览器中直接模拟点击</span>
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-lg text-emerald-800 dark:text-emerald-300 space-y-1">
               <div className="font-semibold">✨ WXGate 特色直通能力:</div>
               <div>
@@ -380,6 +487,102 @@ wx.config({ ...data });`}
           </CardContent>
         </Card>
       </div>
+
+      {/* 账号能力体检与白名单诊断箱 */}
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <CardTitle className="text-base flex items-center gap-2">
+                <HeartPulse className="h-5 w-5 text-rose-500" />
+                <span>公众号接口健康度 & 白名单诊断体检箱</span>
+              </CardTitle>
+              <CardDescription className="text-xs">
+                一键排查当前公众号 AccessToken 有效性、服务器外网出口 IP（用于配置微信后台 IP 白名单）、服务号/订阅号能力匹配
+              </CardDescription>
+            </div>
+            <Button
+              type="button"
+              variant="default"
+              size="sm"
+              onClick={handleDiagnose}
+              disabled={diagnoseLoading || !currentApp}
+              className="gap-1.5 text-xs h-8"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${diagnoseLoading ? 'animate-spin' : ''}`} />
+              <span>{diagnoseLoading ? '体检中...' : '开始接口体检'}</span>
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3 text-xs">
+          {diagnoseResult ? (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="p-3 bg-muted/60 rounded-xl space-y-1">
+                <div className="text-muted-foreground text-[11px]">服务器外网出口 IP:</div>
+                <div className="font-mono text-sm font-bold flex items-center justify-between">
+                  <span>{diagnoseResult.outbound_ip || '未知'}</span>
+                  <button
+                    onClick={() => copyText(diagnoseResult.outbound_ip, '出口 IP')}
+                    className="text-primary hover:underline text-xs flex items-center gap-0.5"
+                  >
+                    <Copy className="h-3 w-3" />
+                    <span>复制</span>
+                  </button>
+                </div>
+                <p className="text-[10.5px] text-muted-foreground">请将此 IP 填入微信后台「IP 白名单」</p>
+              </div>
+
+              <div className="p-3 bg-muted/60 rounded-xl space-y-1">
+                <div className="text-muted-foreground text-[11px]">AccessToken 凭证连通性:</div>
+                <div className="text-sm font-bold flex items-center gap-1">
+                  {diagnoseResult.token_status === 'ok' ? (
+                    <span className="text-emerald-600 flex items-center gap-1">
+                      <CheckCircle2 className="h-4 w-4" /> 正常有效
+                    </span>
+                  ) : (
+                    <span className="text-destructive flex items-center gap-1">
+                      <ShieldAlert className="h-4 w-4" /> 获取失败
+                    </span>
+                  )}
+                </div>
+                {diagnoseResult.token_error && (
+                  <p className="text-[10px] text-destructive truncate" title={diagnoseResult.token_error}>
+                    {diagnoseResult.token_error}
+                  </p>
+                )}
+              </div>
+
+              <div className="p-3 bg-muted/60 rounded-xl space-y-1">
+                <div className="text-muted-foreground text-[11px]">网页授权 (OAuth2) 权限:</div>
+                <div className="text-sm font-bold">
+                  {diagnoseResult.features?.can_oauth_userinfo ? (
+                    <span className="text-emerald-600">已开通 (认证服务号)</span>
+                  ) : (
+                    <span className="text-amber-600">受限 (需微信认证服务号)</span>
+                  )}
+                </div>
+                <p className="text-[10.5px] text-muted-foreground">普通订阅号仅支持静默基础授权</p>
+              </div>
+
+              <div className="p-3 bg-muted/60 rounded-xl space-y-1">
+                <div className="text-muted-foreground text-[11px]">公众号模板消息权限:</div>
+                <div className="text-sm font-bold">
+                  {diagnoseResult.features?.can_template_msg ? (
+                    <span className="text-emerald-600">支持服务号模板</span>
+                  ) : (
+                    <span className="text-muted-foreground">仅支持订阅消息</span>
+                  )}
+                </div>
+                <p className="text-[10.5px] text-muted-foreground">订阅号建议使用一次性订阅消息</p>
+              </div>
+            </div>
+          ) : (
+            <div className="p-4 rounded-xl border border-dashed text-center text-muted-foreground">
+              点击上方「开始接口体检」按钮，一键快速诊断当前公众号各项能力与网络连通性。
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* 原生接口代理端点指引 */}
       <Card>

@@ -140,6 +140,9 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 	// WXGate 网关监控与缓存管理
 	api.GET("/wxgate/stats", gateProxy.GetGateStats)
 	api.DELETE("/wxgate/cache/:app_id", gateProxy.ClearAppCache)
+	api.GET("/wxgate/oauth/session/:session_id", gateProxy.GetOAuthSessionStatus)
+	api.GET("/wxgate/qrcode", gateProxy.GenerateQRCodeImage)
+	api.GET("/wxgate/diagnose", gateProxy.DiagnoseHealth)
 
 	// 受保护的 API 接口 (需 JWT + Casbin 鉴权，支持多租户隔离)
 	protected := api.Group("")

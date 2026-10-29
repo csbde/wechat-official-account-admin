@@ -247,6 +247,9 @@ func (s *WxOpenService) QueryAuth(ctx context.Context, componentAppID, authCode 
 	signature := ""
 	// 默认按公众号记录，若官方档案显示为小程序授权则改写
 	accountKind := "authorized"
+	appType := "service"
+	serviceType := 2
+	verifyType := -1
 	authorizerInfo, err := s.GetAuthorizerInfo(ctx, componentAppID, info.AuthorizerAppid)
 	if err == nil && authorizerInfo != nil {
 		if authorizerInfo.AuthorizerInfo.NickName != "" {
@@ -259,10 +262,17 @@ func (s *WxOpenService) QueryAuth(ctx context.Context, componentAppID, authCode 
 		originalID = authorizerInfo.AuthorizerInfo.UserName
 		qrCodeURL = authorizerInfo.AuthorizerInfo.QRCodeURL
 		signature = authorizerInfo.AuthorizerInfo.Signature
+		serviceType = authorizerInfo.AuthorizerInfo.ServiceTypeInfo.ID
+		verifyType = authorizerInfo.AuthorizerInfo.VerifyTypeInfo.ID
 		// 微信官方以是否存在 MiniProgramInfo 判定授权账号是否为小程序，
 		// 正确标注后才能被「代码发布管理」的小程序选择器检索到
 		if authorizerInfo.AuthorizerInfo.MiniProgramInfo != nil {
 			accountKind = "miniprogram"
+			appType = "miniprogram"
+		} else if serviceType == 0 || serviceType == 1 {
+			appType = "subscription"
+		} else {
+			appType = "service"
 		}
 	}
 
@@ -275,6 +285,9 @@ func (s *WxOpenService) QueryAuth(ctx context.Context, componentAppID, authCode 
 			Name:                   accountName,
 			AppID:                  info.AuthorizerAppid,
 			AccountType:            accountKind,
+			AppType:                appType,
+			ServiceType:            serviceType,
+			VerifyType:             verifyType,
 			ComponentAppID:         componentAppID,
 			AuthorizerRefreshToken: info.AuthorizerRefreshToken,
 			FuncInfo:               string(funcInfoBytes),
@@ -291,6 +304,9 @@ func (s *WxOpenService) QueryAuth(ctx context.Context, componentAppID, authCode 
 	} else {
 		account.Name = accountName
 		account.AccountType = accountKind
+		account.AppType = appType
+		account.ServiceType = serviceType
+		account.VerifyType = verifyType
 		account.ComponentAppID = componentAppID
 		account.AuthorizerRefreshToken = info.AuthorizerRefreshToken
 		account.FuncInfo = string(funcInfoBytes)

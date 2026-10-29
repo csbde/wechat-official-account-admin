@@ -70,6 +70,9 @@ type WxAccount struct {
 	QRCodeURL              string         `gorm:"size:255" json:"qrcode_url"`
 	AvatarURL              string         `gorm:"size:255" json:"avatar_url"`
 	AccountType            string         `gorm:"size:32;default:'direct'" json:"account_type"` // direct, authorized
+	ServiceType            int            `gorm:"default:2" json:"service_type"`               // 微信官方: 0 订阅号, 1 升级订阅号, 2 服务号, 3 小程序
+	VerifyType             int            `gorm:"default:-1" json:"verify_type"`              // 微信官方认证: -1 未认证, 0 微信认证
+	AppType                string         `gorm:"size:32;default:'service'" json:"app_type"`   // service, subscription, miniprogram
 	ComponentAppID         string         `gorm:"size:64;index" json:"component_appid,omitempty"`
 	AuthorizerRefreshToken string         `gorm:"size:255" json:"authorizer_refresh_token,omitempty"`
 	FuncInfo               string         `gorm:"type:text" json:"func_info,omitempty"`

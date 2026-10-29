@@ -1,6 +1,8 @@
 package wxgate
 
 import (
+	"strings"
+	qrcode "github.com/skip2/go-qrcode"
 		"fmt"
 	"net/http"
 	"net/http/httputil"
@@ -149,5 +151,108 @@ func (h *ProxyHandler) ClearAppCache(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"code":    0,
 		"message": "应用缓存已彻底清空: " + appID,
+	})
+}
+
+// GetOAuthSessionStatus 轮询检查扫码测试会话状态 (返回微信用户信息与扫码结果)
+func (h *ProxyHandler) GetOAuthSessionStatus(c *gin.Context) {
+	sessionID := c.Param("session_id")
+	if sessionID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"errcode": 40001, "errmsg": "session_id required"})
+		return
+	}
+
+	sm := GetSessionManager()
+	session, exists := sm.GetSession(sessionID)
+	if !exists {
+		c.JSON(http.StatusNotFound, gin.H{"errcode": 404, "errmsg": "session expired or not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": 0,
+		"data": session,
+	})
+}
+
+// GenerateQRCodeImage 快速将任意 URL 渲染成高清 PNG 二维码输出
+func (h *ProxyHandler) GenerateQRCodeImage(c *gin.Context) {
+	content := c.Query("text")
+	if content == "" {
+		c.String(http.StatusBadRequest, "text required")
+		return
+	}
+
+	pngBytes, err := qrcode.Encode(content, qrcode.Medium, 256)
+	if err != nil {
+		c.String(http.StatusInternalServerError, "generate qrcode error: "+err.Error())
+		return
+	}
+
+	c.Header("Content-Type", "image/png")
+	c.Header("Cache-Control", "no-cache")
+	c.Writer.Write(pngBytes)
+}
+
+// DiagnoseHealth 网关与当前公众号接口健康自检诊断
+func (h *ProxyHandler) DiagnoseHealth(c *gin.Context) {
+	appID := c.Query("appid")
+	if appID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "appid required"})
+		return
+	}
+
+	var account model.WxAccount
+	if err := database.DB.Where("app_id = ?", appID).First(&account).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": 404, "message": "公众号不存在"})
+		return
+	}
+
+	// 1. 获取外网出口 IP (向公共权威 IP 服务探测)
+	outboundIP := "未知"
+	client := resty.New().SetTimeout(3 * time.Second)
+	ipResp, err := client.R().Get("https://api.ipify.org?format=text")
+	if err == nil && ipResp.StatusCode() == 200 {
+		outboundIP = strings.TrimSpace(ipResp.String())
+	}
+
+	// 2. 检查 Access Token 获取与连通性
+	tokenStatus := "ok"
+	tokenErr := ""
+	wxClient, cErr := service.NewWxClient(appID)
+	if cErr != nil {
+		tokenStatus = "error"
+		tokenErr = cErr.Error()
+	} else {
+		_, tErr := wxClient.GetAccessToken(c.Request.Context())
+		if tErr != nil {
+			tokenStatus = "error"
+			tokenErr = tErr.Error()
+		}
+	}
+
+	// 3. 账号类型与功能匹配自检
+	typeFeatures := map[string]interface{}{
+		"is_service":     account.AppType == "service" || account.ServiceType == 2,
+		"is_subscribed":  account.AppType == "subscription" || account.ServiceType == 0 || account.ServiceType == 1,
+		"is_miniprogram": account.AppType == "miniprogram" || account.ServiceType == 3,
+		"is_verified":    account.VerifyType == 0,
+		"can_oauth_userinfo": (account.AppType == "service" || account.ServiceType == 2) && account.VerifyType == 0,
+		"can_template_msg":   account.AppType == "service" || account.ServiceType == 2,
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": 0,
+		"data": gin.H{
+			"appid":         appID,
+			"account_name":  account.Name,
+			"app_type":      account.AppType,
+			"service_type":  account.ServiceType,
+			"verify_type":   account.VerifyType,
+			"outbound_ip":   outboundIP,
+			"token_status":  tokenStatus,
+			"token_error":   tokenErr,
+			"features":      typeFeatures,
+		},
 	})
 }

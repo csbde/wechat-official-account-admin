@@ -11,6 +11,9 @@ export interface WxAccount {
   original_id?: string
   avatar_url?: string
   account_type?: string // direct, authorized
+  app_type?: 'service' | 'subscription' | 'miniprogram'
+  service_type?: number // 0 订阅号, 1 升级订阅号, 2 服务号, 3 小程序
+  verify_type?: number  // -1 未认证, 0 微信认证
   component_appid?: string
   enabled: boolean
   is_default: boolean

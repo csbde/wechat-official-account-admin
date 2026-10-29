@@ -8,12 +8,17 @@ import (
 )
 
 type SessionData struct {
-	AppID               string    `json:"app_id"`
-	OriginalRedirectURI string    `json:"original_redirect_uri"`
-	OriginalState       string    `json:"original_state"`
-	Scope               string    `json:"scope"`
-	UserIP              string    `json:"user_ip"`
-	CreatedAt           time.Time `json:"created_at"`
+	AppID               string        `json:"app_id"`
+	OriginalRedirectURI string        `json:"original_redirect_uri"`
+	OriginalState       string        `json:"original_state"`
+	Scope               string        `json:"scope"`
+	UserIP              string        `json:"user_ip"`
+	CreatedAt           time.Time     `json:"created_at"`
+	Completed           bool          `json:"completed"`
+	CompletedAt         *time.Time    `json:"completed_at,omitempty"`
+	UserInfo            *UserInfoSafe `json:"user_info,omitempty"`
+	Code                string        `json:"code,omitempty"`
+	Error               string        `json:"error,omitempty"`
 }
 
 type GateSessionManager struct {
@@ -79,6 +84,24 @@ func (sm *GateSessionManager) GetSession(sessionID string) (*SessionData, bool) 
 	}
 
 	return session, true
+}
+
+func (sm *GateSessionManager) CompleteSession(sessionID string, code string, user *UserInfoSafe, authErr error) {
+	sm.mutex.Lock()
+	defer sm.mutex.Unlock()
+
+	session, exists := sm.sessions[sessionID]
+	if !exists {
+		return
+	}
+	now := time.Now()
+	session.Completed = true
+	session.CompletedAt = &now
+	session.Code = code
+	session.UserInfo = user
+	if authErr != nil {
+		session.Error = authErr.Error()
+	}
 }
 
 func (sm *GateSessionManager) DeleteSession(sessionID string) {

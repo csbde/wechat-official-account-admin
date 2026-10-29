@@ -167,8 +167,8 @@ func (h *OAuthHandler) HandleCallback(c *gin.Context) {
 		}
 	}
 
-	// 授权确认完成，清理单次会话
-	sm.DeleteSession(sessionID)
+	// 标记会话已完成授权并存入用户信息，以便前端测试扫码器轮询呈现
+	sm.CompleteSession(sessionID, code, userInfoSafe, err)
 
 	// 只有在真正获取到授权信息后，才带上完整的 user_info 拼装并重定向回用户的实际业务跳转地址！
 	finalRedirectURL := h.buildFinalRedirect(session.OriginalRedirectURI, code, session.OriginalState, userInfoSafe)

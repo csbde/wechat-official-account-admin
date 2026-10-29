@@ -204,7 +204,7 @@ func (h *OpenComponentHandler) AuthCallback(c *gin.Context) {
     body {
       margin: 0; padding: 0;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif;
-      background: linear-gradient(135deg, #064e3b 0%, #0f172a 100%);
+      background: linear-gradient(135deg, #064e3b 0%%, #0f172a 100%%);
       color: #fff; min-height: 100vh;
       display: flex; align-items: center; justify-content: center;
     }
@@ -216,13 +216,13 @@ func (h *OpenComponentHandler) AuthCallback(c *gin.Context) {
       padding: 44px 32px;
       text-align: center;
       max-width: 440px;
-      width: 90%;
+      width: 90%%;
       box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
     }
     .icon-box {
       width: 68px; height: 68px;
       margin: 0 auto 20px;
-      border-radius: 50%;
+      border-radius: 50%%;
       background: rgba(16, 185, 129, 0.2);
       border: 2px solid rgba(16, 185, 129, 0.4);
       display: flex; align-items: center; justify-content: center;
@@ -241,7 +241,7 @@ func (h *OpenComponentHandler) AuthCallback(c *gin.Context) {
     }
     p { margin: 0 0 24px; font-size: 13.5px; color: #94a3b8; line-height: 1.6; }
     .btn {
-      display: block; width: 100%;
+      display: block; width: 100%%;
       padding: 13px 0;
       border-radius: 12px;
       background: #059669;
@@ -539,7 +539,7 @@ func (h *OpenComponentHandler) handleFastRegisterTicketCallback(c *gin.Context, 
     body {
       margin: 0; padding: 0;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif;
-      background: linear-gradient(135deg, #064e3b 0%, #0f172a 100%);
+      background: linear-gradient(135deg, #064e3b 0%%, #0f172a 100%%);
       color: #fff; min-height: 100vh;
       display: flex; align-items: center; justify-content: center;
     }
@@ -551,13 +551,13 @@ func (h *OpenComponentHandler) handleFastRegisterTicketCallback(c *gin.Context, 
       padding: 44px 32px;
       text-align: center;
       max-width: 440px;
-      width: 90%;
+      width: 90%%;
       box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
     }
     .icon-box {
       width: 68px; height: 68px;
       margin: 0 auto 20px;
-      border-radius: 50%;
+      border-radius: 50%%;
       background: rgba(16, 185, 129, 0.2);
       border: 2px solid rgba(16, 185, 129, 0.4);
       display: flex; align-items: center; justify-content: center;
@@ -586,7 +586,7 @@ func (h *OpenComponentHandler) handleFastRegisterTicketCallback(c *gin.Context, 
       word-break: break-all;
     }
     .btn {
-      display: block; width: 100%;
+      display: block; width: 100%%;
       padding: 13px 0;
       border-radius: 12px;
       background: #059669;

@@ -30,6 +30,9 @@ import {
   Layers,
   Settings,
   Building2,
+  CheckCircle,
+  HelpCircle,
+  Filter,
 } from 'lucide-react'
 import { AuthorizerDetailView } from './AuthorizerDetail'
 import { TenantScopeBanner } from '@/components/common/TenantScopeBanner'
@@ -45,6 +48,8 @@ const accountSchema = z.object({
   token: z.string().optional(),
   encoding_aes_key: z.string().optional(),
   description: z.string().optional(),
+  app_type: z.enum(['service', 'subscription', 'miniprogram']).default('service'),
+  verify_type: z.number().default(-1),
 })
 
 type AccountFormData = z.infer<typeof accountSchema>
@@ -89,6 +94,7 @@ export const AccountsPage: React.FC = () => {
     },
   })
 
+  const [filterType, setFilterType] = useState<string>('all')
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [openComponentModal, setOpenComponentModal] = useState(false)
@@ -119,6 +125,8 @@ export const AccountsPage: React.FC = () => {
       token: 'wechat_token_2025',
       encoding_aes_key: '',
       description: '',
+      app_type: 'service',
+      verify_type: -1,
     },
   })
 
@@ -348,14 +356,73 @@ export const AccountsPage: React.FC = () => {
         </div>
       )}
 
+      {/* 账号分类过滤导航条 */}
+      <div className="flex flex-wrap items-center justify-between gap-2.5 pb-1">
+        <div className="flex items-center gap-1.5 bg-muted/60 p-1 rounded-xl text-xs">
+          <Button
+            type="button"
+            variant={filterType === 'all' ? 'default' : 'ghost'}
+            size="sm"
+            onClick={() => setFilterType('all')}
+            className="h-7 text-xs px-2.5"
+          >
+            全部 ({accounts?.length || 0})
+          </Button>
+          <Button
+            type="button"
+            variant={filterType === 'service' ? 'default' : 'ghost'}
+            size="sm"
+            onClick={() => setFilterType('service')}
+            className="h-7 text-xs px-2.5"
+          >
+            服务号 ({accounts?.filter((a: any) => (a.app_type === 'service' || (!a.app_type && a.account_type !== 'miniprogram'))).length || 0})
+          </Button>
+          <Button
+            type="button"
+            variant={filterType === 'subscription' ? 'default' : 'ghost'}
+            size="sm"
+            onClick={() => setFilterType('subscription')}
+            className="h-7 text-xs px-2.5"
+          >
+            订阅号 ({accounts?.filter((a: any) => a.app_type === 'subscription' || a.service_type === 0 || a.service_type === 1).length || 0})
+          </Button>
+          <Button
+            type="button"
+            variant={filterType === 'miniprogram' ? 'default' : 'ghost'}
+            size="sm"
+            onClick={() => setFilterType('miniprogram')}
+            className="h-7 text-xs px-2.5"
+          >
+            小程序 ({accounts?.filter((a: any) => a.app_type === 'miniprogram' || a.account_type === 'miniprogram').length || 0})
+          </Button>
+        </div>
+        <span className="text-[11px] text-muted-foreground hidden sm:inline">
+          提示：不同类型微信账号接口权限不同，服务号支持网页授权与模板消息，小程序支持代码发布
+        </span>
+      </div>
+
       {/* 公众号卡片列表 */}
       {isLoading ? (
         <div className="py-12 text-center text-muted-foreground">正在加载公众号数据...</div>
       ) : accounts && accounts.length > 0 ? (
         <div className="grid gap-4 sm:gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-          {accounts.map((acc: any) => {
+          {accounts
+            .filter((acc: any) => {
+              if (filterType === 'all') return true
+              const isMini = acc.app_type === 'miniprogram' || acc.account_type === 'miniprogram'
+              const isSub = acc.app_type === 'subscription' || acc.service_type === 0 || acc.service_type === 1
+              const isServ = (acc.app_type === 'service' || (!acc.app_type && !isMini && !isSub))
+              if (filterType === 'miniprogram') return isMini
+              if (filterType === 'subscription') return isSub
+              if (filterType === 'service') return isServ
+              return true
+            })
+            .map((acc: any) => {
             const isSelected = currentApp?.id === acc.id
             const isAuthorized = acc.account_type === 'authorized'
+            const isMini = acc.app_type === 'miniprogram' || acc.account_type === 'miniprogram'
+            const isSub = acc.app_type === 'subscription' || acc.service_type === 0 || acc.service_type === 1
+            const isVerified = acc.verify_type === 0
 
             return (
               <Card
@@ -382,8 +449,32 @@ export const AccountsPage: React.FC = () => {
                               默认
                             </Badge>
                           )}
+                          {/* 核心区别：服务号 / 订阅号 / 小程序 */}
+                          {isMini ? (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-purple-500/15 text-purple-700 dark:text-purple-300 border border-purple-500/20">
+                              小程序
+                            </span>
+                          ) : isSub ? (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-sky-500/15 text-sky-700 dark:text-sky-300 border border-sky-500/20">
+                              订阅号
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20">
+                              服务号
+                            </span>
+                          )}
+                          {/* 认证状态标识 */}
+                          {isVerified ? (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                              <CheckCircle className="h-2.5 w-2.5" /> 微信认证
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-muted-foreground">
+                              未认证
+                            </span>
+                          )}
                           <Badge variant={isAuthorized ? 'default' : 'secondary'} className="text-[10px]">
-                            {isAuthorized ? '第三方代管授权' : '直接凭据'}
+                            {isAuthorized ? '第三方代管' : '直连凭据'}
                           </Badge>
                         </CardTitle>
                         <CardDescription className="font-mono text-xs mt-0.5">
@@ -728,6 +819,31 @@ export const AccountsPage: React.FC = () => {
               <div className="space-y-1">
                 <label className="text-xs font-semibold">消息加解密密钥 (AESKey)</label>
                 <Input placeholder="43位字符(可选)" {...form.register('encoding_aes_key')} />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-xs font-semibold">账号类型 (AppType) *</label>
+                <select
+                  {...form.register('app_type')}
+                  className="w-full h-9 rounded-lg border border-input bg-background px-3 text-xs"
+                >
+                  <option value="service">服务号 (高级接口完整，推荐)</option>
+                  <option value="subscription">订阅号 (群发与资讯)</option>
+                  <option value="miniprogram">微信小程序</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-semibold">官方认证状态</label>
+                <select
+                  value={form.watch('verify_type')}
+                  onChange={(e) => form.setValue('verify_type', Number(e.target.value))}
+                  className="w-full h-9 rounded-lg border border-input bg-background px-3 text-xs"
+                >
+                  <option value={0}>已通过微信官方认证 (蓝V)</option>
+                  <option value={-1}>未认证 / 个人主体</option>
+                </select>
               </div>
             </div>
 

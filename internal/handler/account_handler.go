@@ -26,6 +26,8 @@ type CreateAccountRequest struct {
 	EncodingAESKey string `json:"encoding_aes_key"`
 	OriginalID     string `json:"original_id"`
 	Description    string `json:"description"`
+	AppType        string `json:"app_type"`     // service, subscription, miniprogram
+	VerifyType     *int   `json:"verify_type"`  // -1: 未认证, 0: 微信认证
 }
 
 type UpdateAccountRequest struct {
@@ -36,6 +38,8 @@ type UpdateAccountRequest struct {
 	OriginalID     string `json:"original_id"`
 	Description    string `json:"description"`
 	Enabled        *bool  `json:"enabled"`
+	AppType        string `json:"app_type"`
+	VerifyType     *int   `json:"verify_type"`
 }
 
 // List 获取公众号列表
@@ -144,6 +148,21 @@ func (h *AccountHandler) Create(c *gin.Context) {
 	var total int64
 	database.DB.Model(&model.WxAccount{}).Where("tenant_id = ?", tenantID).Count(&total)
 
+	appType := req.AppType
+	if appType == "" {
+		appType = "service"
+	}
+	verifyType := -1
+	if req.VerifyType != nil {
+		verifyType = *req.VerifyType
+	}
+	serviceType := 2
+	if appType == "subscription" {
+		serviceType = 0
+	} else if appType == "miniprogram" {
+		serviceType = 3
+	}
+
 	account := model.WxAccount{
 		TenantID:       tenantID, // 强制隔离归属
 		Name:           req.Name,
@@ -153,6 +172,9 @@ func (h *AccountHandler) Create(c *gin.Context) {
 		EncodingAESKey: req.EncodingAESKey,
 		OriginalID:     req.OriginalID,
 		Description:    req.Description,
+		AppType:        appType,
+		ServiceType:    serviceType,
+		VerifyType:     verifyType,
 		Enabled:        true,
 		IsDefault:      total == 0,
 	}
@@ -201,6 +223,19 @@ func (h *AccountHandler) Update(c *gin.Context) {
 	}
 	if req.Enabled != nil {
 		account.Enabled = *req.Enabled
+	}
+	if req.AppType != "" {
+		account.AppType = req.AppType
+		if req.AppType == "subscription" {
+			account.ServiceType = 0
+		} else if req.AppType == "service" {
+			account.ServiceType = 2
+		} else if req.AppType == "miniprogram" {
+			account.ServiceType = 3
+		}
+	}
+	if req.VerifyType != nil {
+		account.VerifyType = *req.VerifyType
 	}
 
 	if err := database.DB.Save(account).Error; err != nil {
@@ -292,11 +327,24 @@ func (h *AccountHandler) GetAuthorizerDetail(c *gin.Context) {
 		if info.Signature != "" && account.Description == "" {
 			updates["description"] = info.Signature
 		}
-		// 微信官方档案显示为小程序授权 (存在 MiniProgramInfo) 时，纠正账号类型，
-		// 使其能被「代码发布管理」的小程序选择器正确检索到
-		if detail.AuthorizerInfo.MiniProgramInfo != nil && account.AccountType != "miniprogram" {
-			updates["account_type"] = "miniprogram"
-			account.AccountType = "miniprogram"
+		// 同步微信权威档案中的服务号/订阅号/小程序类型与认证类型
+		updates["service_type"] = info.ServiceTypeInfo.ID
+		account.ServiceType = info.ServiceTypeInfo.ID
+		updates["verify_type"] = info.VerifyTypeInfo.ID
+		account.VerifyType = info.VerifyTypeInfo.ID
+		if detail.AuthorizerInfo.MiniProgramInfo != nil {
+			updates["app_type"] = "miniprogram"
+			account.AppType = "miniprogram"
+			if account.AccountType != "miniprogram" {
+				updates["account_type"] = "miniprogram"
+				account.AccountType = "miniprogram"
+			}
+		} else if info.ServiceTypeInfo.ID == 0 || info.ServiceTypeInfo.ID == 1 {
+			updates["app_type"] = "subscription"
+			account.AppType = "subscription"
+		} else if info.ServiceTypeInfo.ID == 2 {
+			updates["app_type"] = "service"
+			account.AppType = "service"
 		}
 		if len(detail.AuthorizationInfo.FuncInfo) > 0 {
 			if b, e := json.Marshal(detail.AuthorizationInfo.FuncInfo); e == nil && string(b) != account.FuncInfo {
