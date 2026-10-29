@@ -264,9 +264,26 @@ func (s *WxOpenService) QueryAuth(ctx context.Context, componentAppID, authCode 
 		signature = authorizerInfo.AuthorizerInfo.Signature
 		serviceType = authorizerInfo.AuthorizerInfo.ServiceTypeInfo.ID
 		verifyType = authorizerInfo.AuthorizerInfo.VerifyTypeInfo.ID
-		// 微信官方以是否存在 MiniProgramInfo 判定授权账号是否为小程序，
-		// 正确标注后才能被「代码发布管理」的小程序选择器检索到
-		if authorizerInfo.AuthorizerInfo.MiniProgramInfo != nil {
+		// 微信官方权威判定小程序标准:
+		// 1. MiniProgramInfo 存在
+		// 2. service_type_info.id == 4 (微信官方小程序类型代码)
+		// 3. service_type_info.name 包含 "小程序" 或 "小游戏"
+		// 4. raw 中含有 mini_program_info / MiniProgramInfo
+		typeName := authorizerInfo.AuthorizerInfo.ServiceTypeInfo.Name
+		isMp := authorizerInfo.AuthorizerInfo.MiniProgramInfo != nil ||
+			serviceType == 4 ||
+			strings.Contains(typeName, "小程序") ||
+			strings.Contains(typeName, "小游戏")
+		if rawInfo, ok := authorizerInfo.Raw["authorizer_info"].(map[string]interface{}); ok {
+			if _, hasMp := rawInfo["MiniProgramInfo"]; hasMp {
+				isMp = true
+			}
+			if _, hasMp2 := rawInfo["mini_program_info"]; hasMp2 {
+				isMp = true
+			}
+		}
+
+		if isMp {
 			accountKind = "miniprogram"
 			appType = "miniprogram"
 		} else if serviceType == 0 || serviceType == 1 {

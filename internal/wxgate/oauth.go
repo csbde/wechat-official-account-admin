@@ -322,3 +322,142 @@ func (h *OAuthHandler) buildFinalRedirect(originalRedirect, code, state string, 
 	u.RawQuery = q.Encode()
 	return u.String()
 }
+
+// HandleDebugEchoPage 沙箱测试专用回显页面 (/oauth/debug)
+func (h *OAuthHandler) HandleDebugEchoPage(c *gin.Context) {
+	code := c.Query("code")
+	state := c.Query("state")
+	rawUserInfo := c.Query("user_info")
+
+	var u UserInfoSafe
+	if rawUserInfo != "" {
+		_ = json.Unmarshal([]byte(rawUserInfo), &u)
+	}
+
+	avatar := u.Headimgurl
+	if avatar == "" {
+		avatar = "https://thirdwx.qlogo.cn/mmopen/vi_32/POgEwh4mIHO4nibH0KlMECNjjGxQUq24ZEaGT4poC6icRiccVGKSyXwibcPq4NaCEGghK2JK6ibic6xt5znTLCAEnffg/132"
+	}
+	nickname := u.Nickname
+	if nickname == "" {
+		nickname = "微信授权用户 (静默授权)"
+	}
+
+	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(fmt.Sprintf(`<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WXGate 微信授权沙箱回显</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f172a;
+      color: #f8fafc;
+      margin: 0;
+      padding: 24px 16px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 20px;
+      max-width: 460px;
+      width: 100%%;
+      padding: 28px 20px;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+      text-align: center;
+    }
+    .badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 9999px;
+      font-size: 11px;
+      font-weight: 600;
+      background: rgba(16, 185, 129, 0.2);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      margin-bottom: 16px;
+    }
+    .avatar {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%%;
+      margin: 0 auto 12px;
+      border: 3px solid #10b981;
+      display: block;
+      object-fit: cover;
+      background: #334155;
+    }
+    h2 { margin: 0 0 6px; font-size: 20px; color: #fff; }
+    .location { font-size: 12px; color: #94a3b8; margin-bottom: 20px; }
+    .info-list {
+      background: #0f172a;
+      border-radius: 12px;
+      padding: 12px 14px;
+      text-align: left;
+      font-size: 12px;
+      border: 1px solid #1e293b;
+      margin-bottom: 20px;
+    }
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 7px 0;
+      border-bottom: 1px solid #1e293b;
+    }
+    .info-row:last-child { border-bottom: none; }
+    .label { color: #64748b; font-size: 11px; }
+    .val { font-family: monospace; color: #38bdf8; font-size: 11.5px; word-break: break-all; }
+    .btn {
+      display: block;
+      width: 100%%;
+      padding: 11px 0;
+      border-radius: 10px;
+      background: #10b981;
+      color: #fff;
+      font-weight: 600;
+      font-size: 13.5px;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+    }
+    .btn:hover { background: #059669; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="badge">WXGate 沙箱扫码授权成功</div>
+    <img src="%s" class="avatar" alt="Avatar" referrerpolicy="no-referrer">
+    <h2>%s</h2>
+    <div class="location">%s %s %s</div>
+
+    <div class="info-list">
+      <div class="info-row">
+        <span class="label">OpenID:</span>
+        <span class="val">%s</span>
+      </div>
+      <div class="info-row">
+        <span class="label">UnionID:</span>
+        <span class="val">%s</span>
+      </div>
+      <div class="info-row">
+        <span class="label">授权 Code:</span>
+        <span class="val">%s</span>
+      </div>
+      <div class="info-row">
+        <span class="label">State 状态标识:</span>
+        <span class="val">%s</span>
+      </div>
+    </div>
+
+    <button onclick="window.close()" class="btn">完成测试 / 关闭页面</button>
+  </div>
+</body>
+</html>`, avatar, nickname, u.Country, u.Province, u.City, u.OpenID, u.UnionID, code, state)))
+}

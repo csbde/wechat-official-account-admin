@@ -262,44 +262,75 @@ export const WxGatePage: React.FC = () => {
               </div>
             </div>
 
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <label className="font-semibold text-foreground">目标业务系统实际回调地址 (redirect_uri):</label>
-                <div className="flex items-center gap-1.5">
+                <label className="font-semibold text-foreground">测试模式与回调目标 (redirect_uri):</label>
+                <div className="flex items-center gap-1 bg-muted p-0.5 rounded-lg text-xs">
                   <button
                     type="button"
-                    onClick={() => setTargetRedirect(`${window.location.origin}/oauth/callback`)}
-                    className="text-[11px] text-primary hover:underline flex items-center gap-0.5"
+                    onClick={() => setUseDebugEcho(true)}
+                    className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-all ${
+                      useDebugEcho ? 'bg-background text-primary shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                    }`}
                   >
-                    <Compass className="h-3 w-3" />
-                    <span>当前站点</span>
+                    ✨ 内置沙箱测试回显
                   </button>
-                  <span className="text-muted-foreground/40">|</span>
                   <button
                     type="button"
-                    onClick={() => setTargetRedirect('https://app.yourcompany.com/login/callback')}
-                    className="text-[11px] text-primary hover:underline"
+                    onClick={() => setUseDebugEcho(false)}
+                    className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-all ${
+                      !useDebugEcho ? 'bg-background text-primary shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                    }`}
                   >
-                    子域名系统
-                  </button>
-                  <span className="text-muted-foreground/40">|</span>
-                  <button
-                    type="button"
-                    onClick={() => setTargetRedirect('http://localhost:3000/callback')}
-                    className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-0.5"
-                  >
-                    <Laptop className="h-3 w-3" />
-                    <span>本地联调</span>
+                    外部业务系统回调
                   </button>
                 </div>
               </div>
 
-              <Input
-                value={targetRedirect}
-                onChange={(e) => setTargetRedirect(e.target.value)}
-                placeholder="例如: https://sub.yourcompany.com/callback 或 http://localhost:3000/callback"
-                className="font-mono text-xs"
-              />
+              {useDebugEcho ? (
+                <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-[11px] text-emerald-800 dark:text-emerald-300 space-y-1">
+                  <div className="font-semibold flex items-center gap-1">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                    <span>已启用沙箱调试回显 (推荐测试): <code>{gatewayBase}/oauth/debug</code></span>
+                  </div>
+                  <div>手机微信扫下方二维码授权后，页面会直接展示扫码微信的昵称、头像、OpenID、地区与授权凭证，无需搭建任何前端！</div>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center justify-end gap-1.5 text-[11px] text-muted-foreground">
+                    <span>快捷填入:</span>
+                    <button
+                      type="button"
+                      onClick={() => setTargetRedirect(`${window.location.origin}/oauth/callback`)}
+                      className="text-primary hover:underline flex items-center gap-0.5"
+                    >
+                      <Compass className="h-3 w-3" />当前站点
+                    </button>
+                    <span>|</span>
+                    <button
+                      type="button"
+                      onClick={() => setTargetRedirect('https://app.yourcompany.com/login/callback')}
+                      className="text-primary hover:underline"
+                    >
+                      子域名
+                    </button>
+                    <span>|</span>
+                    <button
+                      type="button"
+                      onClick={() => setTargetRedirect('http://localhost:3000/callback')}
+                      className="text-muted-foreground hover:text-foreground flex items-center gap-0.5"
+                    >
+                      <Laptop className="h-3 w-3" />本地 localhost
+                    </button>
+                  </div>
+                  <Input
+                    value={targetRedirect}
+                    onChange={(e) => setTargetRedirect(e.target.value)}
+                    placeholder="例如: https://sub.yourcompany.com/callback 或 http://localhost:3000/callback"
+                    className="font-mono text-xs"
+                  />
+                </>
+              )}
               <p className="text-[11px] text-muted-foreground">
                 说明：此地址是您自己的具体业务系统接收登录回调的 URL。网关会在此 URL 后面自动拼接 <code>code</code>、<code>state</code> 与脱敏用户信息 <code>user_info</code>。
               </p>

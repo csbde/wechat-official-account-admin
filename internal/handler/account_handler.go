@@ -332,7 +332,21 @@ func (h *AccountHandler) GetAuthorizerDetail(c *gin.Context) {
 		account.ServiceType = info.ServiceTypeInfo.ID
 		updates["verify_type"] = info.VerifyTypeInfo.ID
 		account.VerifyType = info.VerifyTypeInfo.ID
-		if detail.AuthorizerInfo.MiniProgramInfo != nil {
+		typeName := info.ServiceTypeInfo.Name
+		isMp := detail.AuthorizerInfo.MiniProgramInfo != nil ||
+			info.ServiceTypeInfo.ID == 4 ||
+			strings.Contains(typeName, "小程序") ||
+			strings.Contains(typeName, "小游戏")
+		if rawInfo, ok := detail.Raw["authorizer_info"].(map[string]interface{}); ok {
+			if _, hasMp := rawInfo["MiniProgramInfo"]; hasMp {
+				isMp = true
+			}
+			if _, hasMp2 := rawInfo["mini_program_info"]; hasMp2 {
+				isMp = true
+			}
+		}
+
+		if isMp {
 			updates["app_type"] = "miniprogram"
 			account.AppType = "miniprogram"
 			if account.AccountType != "miniprogram" {

@@ -93,6 +93,7 @@ func SetupRouter(frontendFS *embed.FS) *gin.Engine {
 	r.GET("/jssdk/config", gateJSSDK.HandleGetConfig)
 	r.POST("/jssdk/config", gateJSSDK.HandleGetConfig)
 	r.GET("/jweixin.js", gateJSSDK.HandleJSSDKScript)
+	r.GET("/oauth/debug", gateOAuth.HandleDebugEchoPage)
 	r.GET("/jweixin-1.6.0.js", gateJSSDK.HandleJSSDKScript)
 
 	// 3.3 微信全局 Token 与 Ticket 原生接口代理 (两级缓存 + 防穿透单飞合并，彻底告别Token冲刷互踢)

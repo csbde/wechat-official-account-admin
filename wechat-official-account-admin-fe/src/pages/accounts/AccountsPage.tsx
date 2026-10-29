@@ -375,7 +375,7 @@ export const AccountsPage: React.FC = () => {
             onClick={() => setFilterType('service')}
             className="h-7 text-xs px-2.5"
           >
-            服务号 ({accounts?.filter((a: any) => (a.app_type === 'service' || (!a.app_type && a.account_type !== 'miniprogram'))).length || 0})
+            服务号 ({accounts?.filter((a: any) => { const isM = a.app_type === 'miniprogram' || a.account_type === 'miniprogram' || a.service_type === 4 || a.service_type === 3 || (a.name && (a.name.includes('小程序') || a.name.includes('小游戏'))); const isS = !isM && (a.app_type === 'subscription' || a.service_type === 0 || a.service_type === 1); return !isM && !isS; }).length || 0})
           </Button>
           <Button
             type="button"
@@ -393,7 +393,7 @@ export const AccountsPage: React.FC = () => {
             onClick={() => setFilterType('miniprogram')}
             className="h-7 text-xs px-2.5"
           >
-            小程序 ({accounts?.filter((a: any) => a.app_type === 'miniprogram' || a.account_type === 'miniprogram').length || 0})
+            小程序 ({accounts?.filter((a: any) => a.app_type === 'miniprogram' || a.account_type === 'miniprogram' || a.service_type === 4 || a.service_type === 3 || (a.name && (a.name.includes('小程序') || a.name.includes('小游戏')))).length || 0})
           </Button>
         </div>
         <span className="text-[11px] text-muted-foreground hidden sm:inline">
@@ -409,9 +409,13 @@ export const AccountsPage: React.FC = () => {
           {accounts
             .filter((acc: any) => {
               if (filterType === 'all') return true
-              const isMini = acc.app_type === 'miniprogram' || acc.account_type === 'miniprogram'
-              const isSub = acc.app_type === 'subscription' || acc.service_type === 0 || acc.service_type === 1
-              const isServ = (acc.app_type === 'service' || (!acc.app_type && !isMini && !isSub))
+              const isMini = acc.app_type === 'miniprogram' ||
+                acc.account_type === 'miniprogram' ||
+                acc.service_type === 4 ||
+                acc.service_type === 3 ||
+                (acc.name && (acc.name.includes('小程序') || acc.name.includes('小游戏')))
+              const isSub = !isMini && (acc.app_type === 'subscription' || acc.service_type === 0 || acc.service_type === 1)
+              const isServ = !isMini && !isSub
               if (filterType === 'miniprogram') return isMini
               if (filterType === 'subscription') return isSub
               if (filterType === 'service') return isServ
@@ -420,8 +424,12 @@ export const AccountsPage: React.FC = () => {
             .map((acc: any) => {
             const isSelected = currentApp?.id === acc.id
             const isAuthorized = acc.account_type === 'authorized'
-            const isMini = acc.app_type === 'miniprogram' || acc.account_type === 'miniprogram'
-            const isSub = acc.app_type === 'subscription' || acc.service_type === 0 || acc.service_type === 1
+            const isMini = acc.app_type === 'miniprogram' ||
+              acc.account_type === 'miniprogram' ||
+              acc.service_type === 4 ||
+              acc.service_type === 3 ||
+              (acc.name && (acc.name.includes('小程序') || acc.name.includes('小游戏')))
+            const isSub = !isMini && (acc.app_type === 'subscription' || acc.service_type === 0 || acc.service_type === 1)
             const isVerified = acc.verify_type !== undefined && acc.verify_type >= 0
 
             return (
